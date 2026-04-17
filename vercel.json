@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "buildCommand": "npm run build && npm run build:api",
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api" },
+    { "source": "/auth/(.*)", "destination": "/api" },
+    { "source": "/((?!assets/).*)", "destination": "/index.html" }
+  ]
+}
