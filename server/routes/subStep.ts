@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../db";
 import {
   subSteps,
@@ -43,7 +43,7 @@ router.get("/api/sub-step/current", async (req, res) => {
   try {
     const sub = await getCurrentSubStep(user.id);
     const messages = await loadMessages(sub.id);
-    maybeKickoffAnalyse(user.id, sub);
+    void maybeKickoffAnalyse(user.id, sub);
     res.json({ subStep: sub, messages });
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown_error";
@@ -91,7 +91,7 @@ router.post("/api/sub-step/:id/advance", async (req, res) => {
       }).catch(() => {});
     }
 
-    maybeKickoffAnalyse(user.id, next);
+    void maybeKickoffAnalyse(user.id, next);
     res.json(next);
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown_error";
@@ -322,7 +322,7 @@ router.post("/api/sub-step/:id/retry", async (req, res) => {
 
   // Pick up the refreshed sub-step and dispatch to the right worker.
   const [fresh] = await db.select().from(subSteps).where(eq(subSteps.id, id)).limit(1);
-  if (fresh) maybeKickoffAnalyse(user.id, fresh);
+  if (fresh) void maybeKickoffAnalyse(user.id, fresh);
   res.json({ ok: true });
 });
 
@@ -469,24 +469,61 @@ async function runPictureAnalyse(userId: string, subStepId: number): Promise<voi
 // or finished work, do nothing.
 // ---------------------------------------------------------------------------
 
-function maybeKickoffAnalyse(userId: string, sub: SubStep): void {
+async function maybeKickoffAnalyse(userId: string, sub: SubStep): Promise<void> {
   if (sub.beat !== "analyse" || sub.status !== "in_progress" || sub.errorMessage) return;
   const content = (sub.contentJson ?? {}) as { analysisId?: number; draftId?: number };
   if (sub.canvasKey === "picture") {
     if (content.analysisId) return; // work already done
-    runPictureAnalyse(userId, sub.id).catch((err) =>
-      console.error("[maybeKickoffAnalyse] picture failed:", err),
-    );
+    // Atomic CAS claim: only one concurrent caller wins. Multiple parallel
+    // GETs to /api/sub-step/current used to all fire runPictureAnalyse before
+    // the first wrote analysisId back, creating duplicate analyses rows.
+    const claimed = await tryClaimAnalyse(sub.id);
+    if (!claimed) return;
+    runPictureAnalyse(userId, sub.id).catch(async (err) => {
+      console.error("[maybeKickoffAnalyse] picture failed:", err);
+      await releaseAnalyseClaim(sub.id);
+    });
     return;
   }
   if (sub.canvasKey === "analysis") {
-    // Re-run is OK if the draft is still thinking (got interrupted) or didn't
-    // exist. Existing ready/agreed drafts short-circuit.
-    runAnalysisAnalyse(userId, sub.id).catch((err) =>
-      console.error("[maybeKickoffAnalyse] analysis failed:", err),
-    );
+    if (content.draftId) return; // work already done
+    const claimed = await tryClaimAnalyse(sub.id);
+    if (!claimed) return;
+    runAnalysisAnalyse(userId, sub.id).catch(async (err) => {
+      console.error("[maybeKickoffAnalyse] analysis failed:", err);
+      await releaseAnalyseClaim(sub.id);
+    });
     return;
   }
+}
+
+// CAS-style atomic claim using contentJson.analyseRunning. Only one caller
+// gets a row back; others see 0 rows and bail.
+async function tryClaimAnalyse(subStepId: number): Promise<boolean> {
+  const result = await db.execute(sql`
+    UPDATE sub_steps
+    SET content_json = jsonb_set(
+      coalesce(content_json, '{}'::jsonb),
+      '{analyseRunning}',
+      'true'::jsonb
+    ),
+    updated_at = NOW()
+    WHERE id = ${subStepId}
+      AND coalesce(content_json->>'analyseRunning', 'false') = 'false'
+      AND content_json->>'analysisId' IS NULL
+      AND content_json->>'draftId' IS NULL
+    RETURNING id
+  `);
+  return (result.rowCount ?? 0) > 0;
+}
+
+async function releaseAnalyseClaim(subStepId: number): Promise<void> {
+  await db.execute(sql`
+    UPDATE sub_steps
+    SET content_json = (content_json - 'analyseRunning'),
+        updated_at = NOW()
+    WHERE id = ${subStepId}
+  `);
 }
 
 // Canvas 1 just reached Live; create the invisible Canvas 2 Gather and

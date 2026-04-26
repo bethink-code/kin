@@ -84,6 +84,19 @@ export default function Dashboard() {
 
   if (!user) return null;
 
+  // Gate the whole render on the sub-step query settling (success OR error).
+  // Without this, the first paint uses fallback derivations (subStep null →
+  // naturalCanvas defaults to picture, then re-renders to analysis when the
+  // conversation/draft arrives, etc.) — visible as content flashing in then
+  // being replaced by a loader. Quiet "Settling in" frame until we know.
+  if (subStepQ.isPending) {
+    return (
+      <div className="flex items-center justify-center h-screen text-sm text-muted-foreground italic">
+        Settling in…
+      </div>
+    );
+  }
+
   const subStep = subStepQ.data?.subStep ?? null;
 
   // Single nav context. Every navigation decision (relation, current beat,

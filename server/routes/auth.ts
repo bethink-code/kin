@@ -13,16 +13,44 @@ const CLIENT_URL =
 
 router.get("/auth/google", passport.authenticate("google", { scope: ["profile", "email"] }));
 
-router.get(
-  "/auth/callback",
-  passport.authenticate("google", {
-    failureRedirect: `${CLIENT_URL}/?error=not_invited`,
-  }),
-  (req, res) => {
-    audit({ req, action: "auth.login" });
-    res.redirect(CLIENT_URL);
-  }
-);
+// Custom callback handling so OAuth errors don't 500. The browser sometimes
+// re-fires /auth/callback with the same code (back/forward, retry, etc.) —
+// the second hit gets `invalid_grant` from Google and Passport throws
+// TokenError. We catch it, and if the user is already authenticated we just
+// redirect them home; otherwise we redirect with a soft error.
+router.get("/auth/callback", (req, res, next) => {
+  passport.authenticate(
+    "google",
+    (
+      err: (Error & { code?: string }) | null,
+      user: { id: string } | false,
+      info: { message?: string } | undefined,
+    ) => {
+      if (err) {
+        // Already-consumed-code is the dominant prod-log noise. If the user
+        // already has a valid session, the duplicate hit is benign — send
+        // them home. Otherwise log + redirect with an error message.
+        if (req.isAuthenticated?.()) {
+          console.warn(
+            "[auth] callback errored but session is established — redirecting home:",
+            err.message ?? err,
+          );
+          return res.redirect(CLIENT_URL);
+        }
+        console.error("[auth] callback failed:", err.message ?? err);
+        return res.redirect(`${CLIENT_URL}/?error=oauth_failed`);
+      }
+      if (!user) {
+        return res.redirect(`${CLIENT_URL}/?error=${info?.message ?? "not_invited"}`);
+      }
+      req.login(user, (loginErr) => {
+        if (loginErr) return next(loginErr);
+        audit({ req, action: "auth.login" });
+        res.redirect(CLIENT_URL);
+      });
+    },
+  )(req, res, next);
+});
 
 router.post("/auth/logout", (req, res) => {
   audit({ req, action: "auth.logout" });

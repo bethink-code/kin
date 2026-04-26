@@ -633,16 +633,32 @@ import { eq as eq2 } from "drizzle-orm";
 var router = Router();
 var CLIENT_URL = process.env.NODE_ENV === "production" ? process.env.PUBLIC_URL ?? "/" : "http://localhost:5173";
 router.get("/auth/google", passport2.authenticate("google", { scope: ["profile", "email"] }));
-router.get(
-  "/auth/callback",
-  passport2.authenticate("google", {
-    failureRedirect: `${CLIENT_URL}/?error=not_invited`
-  }),
-  (req, res) => {
-    audit({ req, action: "auth.login" });
-    res.redirect(CLIENT_URL);
-  }
-);
+router.get("/auth/callback", (req, res, next) => {
+  passport2.authenticate(
+    "google",
+    (err, user, info) => {
+      if (err) {
+        if (req.isAuthenticated?.()) {
+          console.warn(
+            "[auth] callback errored but session is established \u2014 redirecting home:",
+            err.message ?? err
+          );
+          return res.redirect(CLIENT_URL);
+        }
+        console.error("[auth] callback failed:", err.message ?? err);
+        return res.redirect(`${CLIENT_URL}/?error=oauth_failed`);
+      }
+      if (!user) {
+        return res.redirect(`${CLIENT_URL}/?error=${info?.message ?? "not_invited"}`);
+      }
+      req.login(user, (loginErr) => {
+        if (loginErr) return next(loginErr);
+        audit({ req, action: "auth.login" });
+        res.redirect(CLIENT_URL);
+      });
+    }
+  )(req, res, next);
+});
 router.post("/auth/logout", (req, res) => {
   audit({ req, action: "auth.logout" });
   req.logout(() => {
@@ -3088,7 +3104,7 @@ var analysisConversation_default = router8;
 // server/routes/subStep.ts
 import { Router as Router9 } from "express";
 import { z as z9 } from "zod";
-import { and as and13, asc as asc4, desc as desc13, eq as eq17, isNull as isNull4 } from "drizzle-orm";
+import { and as and13, asc as asc4, desc as desc13, eq as eq17, isNull as isNull4, sql as sql3 } from "drizzle-orm";
 
 // server/modules/subStep/orchestrator.ts
 import { and as and12, desc as desc12, eq as eq16, isNull as isNull3 } from "drizzle-orm";
@@ -3278,7 +3294,7 @@ router9.get("/api/sub-step/current", async (req, res) => {
   try {
     const sub = await getCurrentSubStep(user.id);
     const messages = await loadMessages3(sub.id);
-    maybeKickoffAnalyse(user.id, sub);
+    void maybeKickoffAnalyse(user.id, sub);
     res.json({ subStep: sub, messages });
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown_error";
@@ -3313,7 +3329,7 @@ router9.post("/api/sub-step/:id/advance", async (req, res) => {
       }).catch(() => {
       });
     }
-    maybeKickoffAnalyse(user.id, next);
+    void maybeKickoffAnalyse(user.id, next);
     res.json(next);
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown_error";
@@ -3488,7 +3504,7 @@ router9.post("/api/sub-step/:id/retry", async (req, res) => {
   await clearAnalyseError(user.id, id);
   audit({ req, action: "sub_step.retry", resourceType: "sub_step", resourceId: String(id) });
   const [fresh] = await db.select().from(subSteps).where(eq17(subSteps.id, id)).limit(1);
-  if (fresh) maybeKickoffAnalyse(user.id, fresh);
+  if (fresh) void maybeKickoffAnalyse(user.id, fresh);
   res.json({ ok: true });
 });
 var messageBodySchema3 = z9.object({
@@ -3569,22 +3585,54 @@ async function runPictureAnalyse(userId, subStepId) {
     await markAnalyseError(userId, subStepId, message);
   }
 }
-function maybeKickoffAnalyse(userId, sub) {
+async function maybeKickoffAnalyse(userId, sub) {
   if (sub.beat !== "analyse" || sub.status !== "in_progress" || sub.errorMessage) return;
   const content = sub.contentJson ?? {};
   if (sub.canvasKey === "picture") {
     if (content.analysisId) return;
-    runPictureAnalyse(userId, sub.id).catch(
-      (err) => console.error("[maybeKickoffAnalyse] picture failed:", err)
-    );
+    const claimed = await tryClaimAnalyse(sub.id);
+    if (!claimed) return;
+    runPictureAnalyse(userId, sub.id).catch(async (err) => {
+      console.error("[maybeKickoffAnalyse] picture failed:", err);
+      await releaseAnalyseClaim(sub.id);
+    });
     return;
   }
   if (sub.canvasKey === "analysis") {
-    runAnalysisAnalyse(userId, sub.id).catch(
-      (err) => console.error("[maybeKickoffAnalyse] analysis failed:", err)
-    );
+    if (content.draftId) return;
+    const claimed = await tryClaimAnalyse(sub.id);
+    if (!claimed) return;
+    runAnalysisAnalyse(userId, sub.id).catch(async (err) => {
+      console.error("[maybeKickoffAnalyse] analysis failed:", err);
+      await releaseAnalyseClaim(sub.id);
+    });
     return;
   }
+}
+async function tryClaimAnalyse(subStepId) {
+  const result = await db.execute(sql3`
+    UPDATE sub_steps
+    SET content_json = jsonb_set(
+      coalesce(content_json, '{}'::jsonb),
+      '{analyseRunning}',
+      'true'::jsonb
+    ),
+    updated_at = NOW()
+    WHERE id = ${subStepId}
+      AND coalesce(content_json->>'analyseRunning', 'false') = 'false'
+      AND content_json->>'analysisId' IS NULL
+      AND content_json->>'draftId' IS NULL
+    RETURNING id
+  `);
+  return (result.rowCount ?? 0) > 0;
+}
+async function releaseAnalyseClaim(subStepId) {
+  await db.execute(sql3`
+    UPDATE sub_steps
+    SET content_json = (content_json - 'analyseRunning'),
+        updated_at = NOW()
+    WHERE id = ${subStepId}
+  `);
 }
 async function startCanvas2ForUser(userId) {
   const [existing] = await db.select().from(subSteps).where(
