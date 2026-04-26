@@ -2,6 +2,12 @@ import { db } from "../server/db";
 import { systemPrompts, users } from "../shared/schema";
 import { and, eq } from "drizzle-orm";
 import { QA_STARTER_PROMPT, BRING_IT_IN_STARTER_PROMPT } from "../server/modules/qa/starterPrompt";
+import {
+  ANALYSIS_FACTS_PROMPT,
+  ANALYSIS_PROSE_PROMPT,
+  ANALYSIS_PANELS_PROMPT,
+  ANALYSIS_CHAT_PROMPT,
+} from "../server/modules/analysisDraft/starterPrompts";
 
 const EXTRACTION_PROMPT = `You are an assistant that reads South African bank statement PDFs and extracts their structured contents.
 
@@ -113,6 +119,35 @@ const PROMPTS = [
     description: "Runs while the user is uploading statements (no analysis yet). Reassures, answers process questions (why, format, how many, privacy), encourages uploading. Doesn't drive through financial gaps.",
     model: "claude-sonnet-4-6",
     content: BRING_IT_IN_STARTER_PROMPT,
+  },
+  // --- Canvas 2: Our analysis ---
+  {
+    promptKey: "analysis_facts",
+    label: "Canvas 2 — structured facts",
+    description: "First of three Canvas 2 prompts. Extracts the structured ground truth from everything Canvas 1 established (statements, analysis, conversation profile, flagged issues). Drives both Format A (prose) and Format B (comic). Not a writing pass.",
+    model: "claude-sonnet-4-6",
+    content: ANALYSIS_FACTS_PROMPT,
+  },
+  {
+    promptKey: "analysis_prose",
+    label: "Canvas 2 — text story (Format A)",
+    description: "Renders the facts as an editorial, narrative text — opens with emotional recognition, heavy-to-light arc per PRD §6.5. Inline annotations link to Explain and Notes.",
+    model: "claude-sonnet-4-6",
+    content: ANALYSIS_PROSE_PROMPT,
+  },
+  {
+    promptKey: "analysis_panels",
+    label: "Canvas 2 — comic (Format B)",
+    description: "Renders the facts as a vertical sequence of comic beats — one idea per panel, short anchor copy, curated metaphor vocabulary. Illustration rendering is ring-fenced; this prompt produces the panel data regardless.",
+    model: "claude-sonnet-4-6",
+    content: ANALYSIS_PANELS_PROMPT,
+  },
+  {
+    promptKey: "analysis_chat",
+    label: "Canvas 2 — refining conversation",
+    description: "Drives the discuss/refine/agree loop after the first draft is shown. Decides reply_only vs request_regenerate vs mark_complete each turn. Emits Record-of-Advice note updates.",
+    model: "claude-sonnet-4-6",
+    content: ANALYSIS_CHAT_PROMPT,
   },
 ];
 

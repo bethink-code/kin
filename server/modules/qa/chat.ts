@@ -53,7 +53,10 @@ export async function runQaTurn(input: TurnInput): Promise<TurnOutput> {
   // NOT cached — it changes every turn. History after that is also fresh.
   const response = await client.messages.parse({
     model: input.model,
-    max_tokens: 2000,
+    // Ally's reply is supposed to be short ("a few sentences, never a wall of
+    // text"). Capping at 800 helps the model commit faster instead of using
+    // the full thinking budget — meaningful latency win.
+    max_tokens: 800,
     system: [
       {
         type: "text",
@@ -128,10 +131,11 @@ function buildStableContext(input: TurnInput): string {
   sections.push("", "## Statements so far", statementsBlock, "");
 
   if (input.analysis) {
+    // Compact (no pretty-print). Saves ~30% of analysis tokens vs indent=2.
     sections.push(
       "## Their financial story (from the Analysis phase)",
       "```json",
-      JSON.stringify(input.analysis, null, 2),
+      JSON.stringify(input.analysis),
       "```",
       "",
     );
@@ -141,11 +145,18 @@ function buildStableContext(input: TurnInput): string {
 }
 
 function buildDynamicContext(input: TurnInput): string {
+  // Trim the profile to non-empty fields before serialising. Empty strings
+  // and empty arrays carry no signal but cost tokens — Ally re-reads them
+  // every turn. Compact JSON (no pretty-print) saves more.
+  const trimmedProfile = compactProfile(input.profile);
+  const profileBlock =
+    Object.keys(trimmedProfile).length === 0
+      ? "(nothing established yet)"
+      : "```json\n" + JSON.stringify(trimmedProfile) + "\n```";
+
   const sections: string[] = [
     "## What you've already learned from them (running profile)",
-    "```json",
-    JSON.stringify(input.profile, null, 2),
-    "```",
+    profileBlock,
     "",
     "## Issues you've already flagged (don't repeat these)",
     input.flaggedIssues.length === 0
@@ -173,6 +184,18 @@ function buildDynamicContext(input: TurnInput): string {
 
   sections.push(opening);
   return sections.join("\n");
+}
+
+// Strip empty fields (empty strings, empty arrays) so the profile sent to
+// Ally only contains what's actually been established. Saves ~50-70% of
+// profile tokens for partially-filled profiles.
+function compactProfile(p: QaProfile): Partial<QaProfile> {
+  const out: Partial<QaProfile> = {};
+  for (const [k, v] of Object.entries(p)) {
+    if (typeof v === "string" && v.trim().length > 0) (out as Record<string, unknown>)[k] = v;
+    else if (Array.isArray(v) && v.length > 0) (out as Record<string, unknown>)[k] = v;
+  }
+  return out;
 }
 
 function formatStatementLine(s: StatementSummary): string {

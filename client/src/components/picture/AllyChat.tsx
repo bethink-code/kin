@@ -1,9 +1,10 @@
 import { useEffect } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { invalidateConversation } from "@/lib/invalidation";
+import { invalidateConversation, invalidateAnalysisConversation } from "@/lib/invalidation";
 import { useAuth } from "@/hooks/useAuth";
-import { LOADER_COPY } from "@/lib/uiCopy";
+import { LOADER_COPY, type Phase } from "@/lib/uiCopy";
+import type { CanvasKey } from "@/lib/canvasCopy";
 import { Button } from "@/components/ui/button";
 import { MessageList } from "@/components/conversation/MessageList";
 import { ConversationInput } from "@/components/conversation/ConversationInput";
@@ -14,31 +15,81 @@ type ConversationResponse = {
   messages: ConversationMessage[];
 };
 
+// Endpoint pack per canvas. Chat UI is canvas-shape-agnostic — each canvas supplies
+// its own conversation endpoints. Add a new entry here for a future canvas (plan,
+// progress) without touching the chat rendering logic.
+const SOURCES: Record<CanvasKey, {
+  queryKey: string;
+  startPath: string;
+  messagePath: string;
+  invalidate: (qc: typeof queryClient) => void;
+}> = {
+  picture: {
+    queryKey: "/api/qa/conversation",
+    startPath: "/api/qa/start",
+    messagePath: "/api/qa/message",
+    invalidate: invalidateConversation,
+  },
+  analysis: {
+    queryKey: "/api/analysis-conversation",
+    startPath: "/api/analysis-conversation/start",
+    messagePath: "/api/analysis-conversation/message",
+    invalidate: invalidateAnalysisConversation,
+  },
+  // Plan and progress aren't scoped yet; fall back to picture endpoints so a
+  // misconfigured canvas doesn't crash the UI.
+  plan: {
+    queryKey: "/api/qa/conversation",
+    startPath: "/api/qa/start",
+    messagePath: "/api/qa/message",
+    invalidate: invalidateConversation,
+  },
+  progress: {
+    queryKey: "/api/qa/conversation",
+    startPath: "/api/qa/start",
+    messagePath: "/api/qa/message",
+    invalidate: invalidateConversation,
+  },
+};
+
 // Chat body for Ally's pane. No drawer, no modal — just the message stream + input.
-// Auto-starts the conversation the first time it mounts with no existing conversation.
-// Works in every phase: the backend varies its context block by whether an analysis exists,
-// but the client flow is identical (query → auto-start → send message).
-export function AllyChat() {
+// Auto-starts the conversation the first time it mounts with no existing conversation,
+// unless `canStart` is false (e.g. Canvas 2 while the draft is still thinking —
+// the server would reject /start until the draft is ready).
+// Canvas-aware: the endpoints switch based on which canvas the user is currently on.
+export function AllyChat({
+  canvas = "picture",
+  canStart = true,
+}: {
+  canvas?: CanvasKey;
+  canStart?: boolean;
+}) {
   const { user } = useAuth();
-  const phase = user?.buildCompletedAt ? "first_take_gaps" : "bring_it_in";
+  const source = SOURCES[canvas];
+  const phase: Phase = canvas === "analysis"
+    ? "analysis_refining"
+    : user?.buildCompletedAt
+      ? "first_take_gaps"
+      : "bring_it_in";
   const loader = LOADER_COPY[phase];
 
   const q = useQuery<ConversationResponse>({
-    queryKey: ["/api/qa/conversation"],
+    queryKey: [source.queryKey],
   });
 
   const start = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/qa/start"),
-    onSuccess: () => invalidateConversation(queryClient),
+    mutationFn: () => apiRequest("POST", source.startPath),
+    onSuccess: () => source.invalidate(queryClient),
   });
 
   const send = useMutation({
-    mutationFn: (content: string) => apiRequest("POST", "/api/qa/message", { content }),
-    onSuccess: () => invalidateConversation(queryClient),
+    mutationFn: (content: string) => apiRequest("POST", source.messagePath, { content }),
+    onSuccess: () => source.invalidate(queryClient),
   });
 
   useEffect(() => {
     if (
+      canStart &&
       q.data &&
       !q.data.conversation &&
       !start.isPending &&
@@ -47,7 +98,7 @@ export function AllyChat() {
     ) {
       start.mutate();
     }
-  }, [q.data, start]);
+  }, [canStart, q.data, start]);
 
   const conversation = q.data?.conversation ?? null;
   const messages = q.data?.messages ?? [];
@@ -59,8 +110,8 @@ export function AllyChat() {
   const inputLocked = start.isPending || send.isPending || !conversation || isComplete;
 
   return (
-    <div className="flex flex-col h-full min-h-0">
-      <main className="flex-1 overflow-y-auto px-6 py-8 min-h-0">
+    <div className="flex flex-col h-full min-h-0 bg-muted">
+      <main className="flex-1 overflow-y-auto px-6 py-8 min-h-0 shadow-[inset_0_0_0_4px_var(--color-muted)]">
         {settling ? (
           <div className="flex flex-col items-start gap-2">
             <div className="font-serif text-xl text-foreground/80">{loader.title}</div>

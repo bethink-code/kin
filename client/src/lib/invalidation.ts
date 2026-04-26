@@ -23,3 +23,11 @@ export function invalidatePrompts(qc: QueryClient) {
 export function invalidateConversation(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: ["/api/qa/conversation"] });
 }
+
+export function invalidateAnalysisConversation(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ["/api/analysis-conversation"] });
+}
+
+export function invalidateAnalysisDraft(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ["/api/analysis-draft/current"] });
+}

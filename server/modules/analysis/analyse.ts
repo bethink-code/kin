@@ -28,7 +28,9 @@ export async function analyseStatements(input: AnalyseInput): Promise<AnalyseOut
 
   const response = await client.messages.parse({
     model: input.model,
-    max_tokens: 16000,
+    // Lowered from 16000 — observed outputs are ~3.5k tokens. The high
+    // ceiling was costing latency without ever being needed.
+    max_tokens: 6000,
     system: [
       {
         type: "text",
@@ -62,8 +64,10 @@ export async function analyseStatements(input: AnalyseInput): Promise<AnalyseOut
 
 function buildUserMessage(statements: AnalyseInput["statements"]): string {
   const header = `You are being given ${statements.length} extracted bank statements covering a period of months. Analyse the whole set together, not one at a time.\n\n`;
+  // Compact JSON (no pretty-print). Saves ~30% tokens — each statement's
+  // transactions array is the bulk of the input.
   const body = statements
-    .map((s, i) => `## Statement ${i + 1} — ${s.filename}\n\`\`\`json\n${JSON.stringify(s.extraction, null, 2)}\n\`\`\``)
+    .map((s, i) => `## Statement ${i + 1} — ${s.filename}\n\`\`\`json\n${JSON.stringify(s.extraction)}\n\`\`\``)
     .join("\n\n");
   return header + body;
 }

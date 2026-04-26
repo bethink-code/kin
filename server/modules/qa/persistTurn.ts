@@ -10,6 +10,7 @@ import {
 import { runQaTurn, type StatementSummary, type QaPhase } from "./chat";
 import { mergeFlaggedIssues, mergeProfile } from "./mergeProfile";
 import type { QaProfile } from "./schema";
+import { onStateChange } from "../stateChange";
 
 type RunAndPersistInput = {
   conversationId: number;
@@ -85,5 +86,71 @@ export async function runAndPersistTurn(input: RunAndPersistInput): Promise<RunA
     .where(and(eq(conversations.id, input.conversationId), eq(conversations.userId, input.userId)))
     .returning();
 
+  // Polarity flip: each turn's newly-established facts also land in the
+  // record. Compute deltas against the prior profile so we only write what
+  // genuinely changed; corrections and goals (arrays) emit one note per new
+  // entry; non-empty strings emit one note when the merged value differs.
+  const deltas = diffProfile(input.profile, mergedProfile);
+  const newFlags = mergedFlags.filter((f) => !input.flaggedIssues.includes(f));
+  if (Object.keys(deltas).length > 0 || newFlags.length > 0) {
+    onStateChange({
+      userId: input.userId,
+      trigger: "chat_turn_taken",
+      canvas: "picture",
+      payload: {
+        canvas: "picture",
+        deltas,
+        newFlaggedIssues: newFlags,
+        // record_notes.source_message_id has an FK to sub_step_messages, but
+        // qa chat still writes to the legacy conversation_messages table.
+        // Pass null on the FK and stash the legacy id in attributes for
+        // traceability until the chat moves to sub_step_messages.
+        sourceMessageId: null,
+        legacyConversationMessageId: assistantMessage.id,
+        sourceSubStepId: null,
+      },
+    }).catch(() => {});
+  }
+
   return { conversation, assistantMessage };
+}
+
+// Field-by-field delta. For string fields we emit { before, after, kind:"fact" }
+// when the merged value is non-empty AND differs from the prior. For
+// corrections/goals (arrays) we emit one entry per genuinely new item, keyed
+// by a synthetic field so each becomes its own note.
+function diffProfile(prior: QaProfile, merged: QaProfile) {
+  const out: Record<string, { before: unknown; after: unknown; kind: "fact" | "preference" | "concern" | "intention" }> = {};
+  const stringFields: Array<keyof QaProfile> = [
+    "otherAccounts",
+    "incomeContext",
+    "debt",
+    "medicalCover",
+    "lifeCover",
+    "incomeProtection",
+    "retirement",
+    "tax",
+    "property",
+    "lifeContext",
+    "will",
+  ];
+  for (const f of stringFields) {
+    const before = prior[f] as string;
+    const after = merged[f] as string;
+    if (typeof after === "string" && after.trim().length > 0 && after !== before) {
+      out[f] = { before: before ?? null, after, kind: "fact" };
+    }
+  }
+  // Corrections and goals: dedup against prior, then emit one record per new
+  // item using a stable suffix so multiple new entries in one turn each get
+  // their own note.
+  const newCorrections = merged.corrections.filter((c) => !prior.corrections.includes(c));
+  newCorrections.forEach((c, i) => {
+    out[`corrections_${i}`] = { before: null, after: c, kind: "concern" };
+  });
+  const newGoals = merged.goals.filter((g) => !prior.goals.includes(g));
+  newGoals.forEach((g, i) => {
+    out[`goals_${i}`] = { before: null, after: g, kind: "intention" };
+  });
+  return out;
 }

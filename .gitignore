@@ -8,3 +8,4 @@ dist/
 .vercel/
 drizzle/
 Scratch/
+.claude/settings.local.json

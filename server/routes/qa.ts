@@ -16,6 +16,8 @@ import { getActivePrompt } from "../modules/prompts/getPrompt";
 import { runAndPersistTurn } from "../modules/qa/persistTurn";
 import { emptyProfile, type QaProfile } from "../modules/qa/schema";
 import type { StatementSummary, QaPhase } from "../modules/qa/chat";
+import { onStateChange } from "../modules/stateChange";
+import { isStale } from "../modules/stateChange/messages";
 
 // Derive the user's current QA phase from state. Must match how the client
 // renders the sub-step so prompts stay in sync with what the user sees.
@@ -60,7 +62,11 @@ const messageBodySchema = z.object({
 // the DB for display. The running profile (on conversations.profile) is the long-term
 // memory across the whole conversation; raw older turns become redundant once their
 // facts are captured there.
-const MAX_HISTORY_MESSAGES = 12;
+//
+// Trimmed from 12 → 6: with Haiku 4.5 the smaller window meaningfully cuts
+// per-turn latency without losing context, since the profile is the durable
+// memory and older raw turns mostly add noise.
+const MAX_HISTORY_MESSAGES = 6;
 
 router.get("/api/qa/conversation", async (req, res) => {
   const user = req.user as { id: string; firstName: string | null; email: string; buildCompletedAt: Date | string | null };
@@ -136,6 +142,29 @@ router.get("/api/qa/conversation", async (req, res) => {
         // Soft-fail: return what we have, the user can retry by sending a message.
       }
     }
+  }
+
+  // Re-opener: if the chat is active and the latest message is older than the
+  // staleness threshold, post a "welcome back" turn before responding so the
+  // user lands back into context. Mutually exclusive with the transition
+  // opener above — that path inserts a fresh message, so this staleness
+  // check returns false on the same request.
+  const [latestMsg] = await db
+    .select({ createdAt: conversationMessages.createdAt })
+    .from(conversationMessages)
+    .where(eq(conversationMessages.conversationId, conversation.id))
+    .orderBy(desc(conversationMessages.createdAt))
+    .limit(1);
+  if (
+    conversation.status === "active" &&
+    isStale(latestMsg?.createdAt ?? null)
+  ) {
+    await onStateChange({
+      userId: user.id,
+      trigger: "session_resumed",
+      canvas: "picture",
+      payload: { canvas: "picture", beat: "discuss" },
+    });
   }
 
   const [refreshed] = await db

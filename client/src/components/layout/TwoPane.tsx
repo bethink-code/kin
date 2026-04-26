@@ -94,13 +94,10 @@ export function TwoPane({ left, right }: { left: ReactNode; right: ReactNode }) 
         title="Drag to resize · double-click to reset"
         className="hidden md:flex items-stretch w-1.5 cursor-col-resize flex-shrink-0 group"
       >
-        <div className="w-px mx-auto bg-border group-hover:bg-accent/60 group-active:bg-accent transition-colors" />
+        <div className="w-px mx-auto bg-transparent group-hover:bg-accent/60 group-active:bg-accent transition-colors" />
       </div>
 
-      <div
-        className="flex flex-col min-h-0 flex-1 bg-background"
-        style={{ borderRight: "4px solid #e8e1d1", borderBottom: "4px solid #e8e1d1" }}
-      >
+      <div className="flex flex-col min-h-0 flex-1 bg-background">
         {right}
       </div>
     </div>
