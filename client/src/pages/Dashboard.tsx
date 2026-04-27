@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { TopBar } from "@/components/layout/TopBar";
@@ -21,6 +21,11 @@ import {
   isPeekMode,
   type NavContext,
 } from "@/lib/navigation";
+import {
+  hasSeenLanding,
+  markLandingSeen,
+  hasEverSeenALanding,
+} from "@/lib/seenLandings";
 import type {
   AnalysisDraft as AnalysisDraftRow,
   Conversation,
@@ -146,6 +151,24 @@ export default function Dashboard() {
   const peek = isPeekMode(effectiveCanvas, effectiveBeat, navCtx);
   const beatRelation = getBeatRelation(effectiveCanvas, effectiveBeat, navCtx);
 
+  // First-arrival landing: when the user lands on a beat they've never seen
+  // before (post-onboarding into Gather, server advance into Analyse, agree
+  // into Live, reopen into a new Discuss instance), auto-fire the
+  // interstitial. The landing is per-(canvas, beat, instance) — once
+  // dismissed it doesn't re-show on refresh, but a fresh instance does.
+  // Skip if user is already in a tab-click landing flow (don't double-up).
+  useEffect(() => {
+    if (!subStep || tabNavStage !== null) return;
+    if (!hasSeenLanding(subStep.canvasKey as CanvasKey, subStep.beat as Beat, subStep.instance)) {
+      setTabNavStage("landing");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subStep?.id]);
+
+  // Whether this is the user's very first landing ever — drives the
+  // product-orientation copy on the Gather card (vs. the routine version).
+  const isFirstEver = !hasEverSeenALanding();
+
   return (
     <div className="flex flex-col h-screen">
       <TopBar
@@ -161,6 +184,7 @@ export default function Dashboard() {
                 canvas={effectiveCanvas}
                 beat={effectiveBeat}
                 relation={beatRelation}
+                isFirstEver={isFirstEver}
                 onCta={() => setTabNavStage("transitioning")}
                 onBackToCurrent={backToCurrent}
               />
@@ -168,9 +192,21 @@ export default function Dashboard() {
               <BeatTransition
                 canvas={effectiveCanvas === "plan" || effectiveCanvas === "progress" ? "picture" : effectiveCanvas}
                 beat={effectiveBeat}
-                // Keep the override so peek mode persists. User exits via the
-                // foot bar's "Back to current" — single explicit action.
-                onDone={() => setTabNavStage(null)}
+                // Mark the landing for the user's CURRENT beat as seen so it
+                // won't auto-fire on refresh. (For tab-click peeks, the
+                // current beat is what the user actually returns to.) Then
+                // clear the stage. Override stays — peek mode persists until
+                // the user explicitly clicks "Back to current".
+                onDone={() => {
+                  if (subStep) {
+                    markLandingSeen(
+                      subStep.canvasKey as CanvasKey,
+                      subStep.beat as Beat,
+                      subStep.instance,
+                    );
+                  }
+                  setTabNavStage(null);
+                }}
               />
             ) : effectiveCanvas === "plan" || effectiveCanvas === "progress" ? (
               // No content for plan/progress yet; landing already dismissed.

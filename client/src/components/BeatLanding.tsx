@@ -173,17 +173,28 @@ export function BeatLanding({
   canvas,
   beat,
   relation,
+  isFirstEver,
   onCta,
   onBackToCurrent,
 }: {
   canvas: CanvasKey;
   beat: Beat;
   relation: BeatRelation;
+  /** True for the user's very first landing ever — drives the product
+   *  orientation copy on the Gather card. */
+  isFirstEver?: boolean;
   /** Past + current — proceed into the content (via BeatTransition). */
   onCta: () => void;
   /** Future or placeholder — dismiss without entering anything. */
   onBackToCurrent: () => void;
 }) {
+  // First-ever Gather gets the orientation card (what Kin is, no-advice
+  // expectation, what we're going to build, why 12 months). Subsequent
+  // visits to Gather get the routine summary.
+  if (isFirstEver && canvas === "picture" && beat === "gather" && relation === "current") {
+    return <FirstEverOrientation onCta={onCta} />;
+  }
+
   const copy = COPY[canvas][beat];
   const title = copy.titles[relation];
   const sub = copy.sub[relation];
@@ -253,6 +264,67 @@ export function BeatLanding({
           </p>
         )}
         <Button onClick={ctaAction}>{ctaLabel}</Button>
+      </div>
+    </div>
+  );
+}
+
+// Shown ONLY the first time a brand-new user lands in Gather — answers the
+// "what is this thing? what does it do?" question explicitly so the user
+// doesn't carry that confusion into the upload screen and Ally's first chat
+// turn. Sets the no-advice expectation up front. Subsequent Gather landings
+// fall back to the routine summary copy above.
+function FirstEverOrientation({ onCta }: { onCta: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-full px-6 py-10 text-center overflow-y-auto">
+      <div className="max-w-xl space-y-5">
+        <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+          Welcome — let's start
+        </div>
+        <h2 className="font-serif text-3xl leading-tight">
+          We build your picture before anything else.
+        </h2>
+        <p className="text-base text-foreground/85 leading-relaxed">
+          Kin isn't a financial adviser. We don't tell you what to buy, where
+          to put your money, or what you should do. We help you see your
+          situation clearly — that's the whole point.
+        </p>
+        <div className="rounded-lg border border-border bg-card/60 p-5 text-left space-y-3 text-sm leading-relaxed">
+          <div className="flex gap-3">
+            <span className="font-serif text-xl text-accent leading-none">1</span>
+            <div>
+              <div className="font-medium">You upload your last twelve months of bank statements.</div>
+              <div className="text-muted-foreground text-xs mt-0.5">
+                Any bank, any format. Twelve months gives me a full year to find rhythms.
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <span className="font-serif text-xl text-accent leading-none">2</span>
+            <div>
+              <div className="font-medium">I read across all of them and write you a first-take story.</div>
+              <div className="text-muted-foreground text-xs mt-0.5">
+                Your money, in plain language. Not a dashboard — a narrative.
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <span className="font-serif text-xl text-accent leading-none">3</span>
+            <div>
+              <div className="font-medium">We shape it together until it lands right.</div>
+              <div className="text-muted-foreground text-xs mt-0.5">
+                You correct what's off, fill the gaps the statements can't show. When you say "this is me", we lock the baseline.
+              </div>
+            </div>
+          </div>
+        </div>
+        <p className="text-sm text-muted-foreground italic">
+          From there we move into the analysis, then a plan — but never advice.
+          You stay in charge of every decision.
+        </p>
+        <div className="pt-2">
+          <Button onClick={onCta}>Start uploading →</Button>
+        </div>
       </div>
     </div>
   );
