@@ -37,7 +37,10 @@ router.get("/auth/callback", (req, res, next) => {
           );
           return res.redirect(CLIENT_URL);
         }
-        console.error("[auth] callback failed:", err.message ?? err);
+        // Log as warn, not error: the user-facing flow is fine (they get a
+        // soft redirect with a retry-able banner). Vercel's "1 Error" badge
+        // shouldn't fire on routine OAuth retries.
+        console.warn("[auth] callback bad-request — soft retry:", err.message ?? err);
         return res.redirect(`${CLIENT_URL}/?error=oauth_failed`);
       }
       if (!user) {

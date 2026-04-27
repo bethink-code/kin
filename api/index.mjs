@@ -653,7 +653,7 @@ router.get("/auth/callback", (req, res, next) => {
           );
           return res.redirect(CLIENT_URL);
         }
-        console.error("[auth] callback failed:", err.message ?? err);
+        console.warn("[auth] callback bad-request \u2014 soft retry:", err.message ?? err);
         return res.redirect(`${CLIENT_URL}/?error=oauth_failed`);
       }
       if (!user) {
