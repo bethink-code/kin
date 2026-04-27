@@ -60,9 +60,9 @@ export function RefreshArtefactBar({ canvas }: RefreshArtefactBarProps) {
   }, [latestQ.data?.id, refreshing, canvas, queryClient]);
 
   return (
-    <div className="flex items-center justify-end gap-3 -mt-2 mb-6 text-xs">
+    <div className="flex items-center justify-end gap-3 -mt-2 mb-6">
       {refreshing && (
-        <span className="text-muted-foreground italic flex items-center gap-2">
+        <span className="text-xs text-muted-foreground italic flex items-center gap-2">
           <span className="flex items-center gap-1" aria-hidden>
             <span className="h-1.5 w-1.5 rounded-full bg-accent/80 animate-pulse [animation-delay:0ms]" />
             <span className="h-1.5 w-1.5 rounded-full bg-accent/80 animate-pulse [animation-delay:200ms]" />
@@ -75,9 +75,11 @@ export function RefreshArtefactBar({ canvas }: RefreshArtefactBarProps) {
         type="button"
         onClick={() => trigger.mutate()}
         disabled={refreshing || trigger.isPending}
-        className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+        title="Re-run the analysis with the latest chat corrections"
       >
-        {refreshing || trigger.isPending ? "Refreshing…" : "↻ Refresh"}
+        <span aria-hidden className={refreshing || trigger.isPending ? "animate-spin inline-block" : "inline-block"}>↻</span>
+        {refreshing || trigger.isPending ? "Refreshing…" : "Refresh"}
       </button>
     </div>
   );
