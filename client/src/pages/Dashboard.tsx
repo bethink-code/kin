@@ -87,13 +87,27 @@ export default function Dashboard() {
   });
   const [tabNavStage, setTabNavStage] = useState<TabNavStage>(null);
 
+  // First-arrival landing: when the user lands on a beat they've never seen
+  // before, auto-fire the interstitial. Per-(canvas, beat, instance) — once
+  // dismissed it doesn't re-show on refresh; a new instance does.
+  //
+  // IMPORTANT: hooks must be called unconditionally on every render (Rules
+  // of Hooks). Keep this useEffect ABOVE any early returns. Reads from the
+  // query result directly (not a derived const) to avoid an ordering bind.
+  useEffect(() => {
+    const sub = subStepQ.data?.subStep;
+    if (!sub || tabNavStage !== null) return;
+    if (!hasSeenLanding(sub.canvasKey as CanvasKey, sub.beat as Beat, sub.instance)) {
+      setTabNavStage("landing");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subStepQ.data?.subStep?.id]);
+
   if (!user) return null;
 
   // Gate the whole render on the sub-step query settling (success OR error).
-  // Without this, the first paint uses fallback derivations (subStep null →
-  // naturalCanvas defaults to picture, then re-renders to analysis when the
-  // conversation/draft arrives, etc.) — visible as content flashing in then
-  // being replaced by a loader. Quiet "Settling in" frame until we know.
+  // Quiet "Settling in" frame so first paint doesn't flicker through fallback
+  // canvas/beat derivations as queries arrive in different orders.
   if (subStepQ.isPending) {
     return (
       <div className="flex items-center justify-center h-screen text-sm text-muted-foreground italic">
@@ -150,20 +164,6 @@ export default function Dashboard() {
 
   const peek = isPeekMode(effectiveCanvas, effectiveBeat, navCtx);
   const beatRelation = getBeatRelation(effectiveCanvas, effectiveBeat, navCtx);
-
-  // First-arrival landing: when the user lands on a beat they've never seen
-  // before (post-onboarding into Gather, server advance into Analyse, agree
-  // into Live, reopen into a new Discuss instance), auto-fire the
-  // interstitial. The landing is per-(canvas, beat, instance) — once
-  // dismissed it doesn't re-show on refresh, but a fresh instance does.
-  // Skip if user is already in a tab-click landing flow (don't double-up).
-  useEffect(() => {
-    if (!subStep || tabNavStage !== null) return;
-    if (!hasSeenLanding(subStep.canvasKey as CanvasKey, subStep.beat as Beat, subStep.instance)) {
-      setTabNavStage("landing");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subStep?.id]);
 
   // Whether this is the user's very first landing ever — drives the
   // product-orientation copy on the Gather card (vs. the routine version).
