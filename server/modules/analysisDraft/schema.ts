@@ -13,7 +13,7 @@ import { z } from "zod/v4";
 // --- Facts ---------------------------------------------------------------
 
 export const evidenceRefSchema = z.object({
-  kind: z.enum(["transaction", "profile", "analysis", "conversation", "statement"]),
+  kind: z.string().describe("Source kind. Canonical values: 'transaction' | 'profile' | 'analysis' | 'conversation' | 'statement'. Loose enum — Anthropic's structured output occasionally emits adjacent values (e.g. 'fact', 'summary') and a strict enum kills the whole pipeline; downstream code treats kind as a hint, not a hard contract."),
   ref: z.string().describe("Opaque identifier — transaction id, profile path like 'family.dependents', statement id, etc."),
 });
 

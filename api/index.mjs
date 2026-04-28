@@ -2581,7 +2581,7 @@ function sumUsage(usages) {
 // server/modules/analysisDraft/schema.ts
 import { z as z7 } from "zod/v4";
 var evidenceRefSchema = z7.object({
-  kind: z7.enum(["transaction", "profile", "analysis", "conversation", "statement"]),
+  kind: z7.string().describe("Source kind. Canonical values: 'transaction' | 'profile' | 'analysis' | 'conversation' | 'statement'. Loose enum \u2014 Anthropic's structured output occasionally emits adjacent values (e.g. 'fact', 'summary') and a strict enum kills the whole pipeline; downstream code treats kind as a hint, not a hard contract."),
   ref: z7.string().describe("Opaque identifier \u2014 transaction id, profile path like 'family.dependents', statement id, etc.")
 });
 var keyFactSchema = z7.object({
@@ -2713,7 +2713,12 @@ async function generateFacts(input) {
     systemPrompt: input.systemPrompt,
     model: input.model,
     userMessage,
-    outputSchema: analysisFactsSchema
+    outputSchema: analysisFactsSchema,
+    // Power users (12+ months of business data) generate Facts outputs that
+    // exceed the 6000-token shared default. Saw this for savannah's prd run:
+    // Anthropic stopped mid-string at ~24k chars. Prose/panels are bounded by
+    // narrative shape, so they keep the lower default.
+    maxTokens: 16e3
   });
   return { facts: parsed, usage };
 }

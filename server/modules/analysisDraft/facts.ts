@@ -28,6 +28,11 @@ export async function generateFacts(input: FactsInput): Promise<{
     model: input.model,
     userMessage,
     outputSchema: analysisFactsSchema,
+    // Power users (12+ months of business data) generate Facts outputs that
+    // exceed the 6000-token shared default. Saw this for savannah's prd run:
+    // Anthropic stopped mid-string at ~24k chars. Prose/panels are bounded by
+    // narrative shape, so they keep the lower default.
+    maxTokens: 16000,
   });
   return { facts: parsed, usage };
 }
