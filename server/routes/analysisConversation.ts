@@ -12,6 +12,7 @@ import { isAuthenticated } from "../auth";
 import { audit } from "../auditLog";
 import { getActivePrompt } from "../modules/prompts/getPrompt";
 import { runAnalysisChatTurn } from "../modules/analysisDraft/chat";
+import { refreshCanvas2Draft } from "../modules/analysisDraft/refresh";
 import type {
   AnalysisFacts,
   AnalysisProse,
@@ -250,10 +251,13 @@ router.post("/api/analysis-conversation/message", async (req, res) => {
     }
 
     if (turn.action === "request_regenerate") {
-      await db
-        .update(analysisDrafts)
-        .set({ status: "superseded", supersededAt: new Date() })
-        .where(eq(analysisDrafts.id, draft.id));
+      // Fire the actual rebuild in the background. refreshCanvas2Draft
+      // supersedes the current draft itself, so we don't need to do that
+      // separately here. The client picks up the new draft via its existing
+      // /api/analysis-draft/current polling.
+      refreshCanvas2Draft(user.id).catch((err) => {
+        console.warn("[analysis_conversation] auto-refresh failed:", err);
+      });
       audit({
         req,
         action: "analysis_draft.regenerate_requested",

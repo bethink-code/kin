@@ -15,6 +15,7 @@ import { isAuthenticated } from "../auth";
 import { audit } from "../auditLog";
 import { getActivePrompt } from "../modules/prompts/getPrompt";
 import { buildAnalysisDraft } from "../modules/analysisDraft/build";
+import { refreshCanvas2Draft } from "../modules/analysisDraft/refresh";
 
 const router = Router();
 router.use(isAuthenticated);
@@ -298,114 +299,19 @@ router.post("/api/analysis-draft/:id/reopen", async (req, res) => {
 // /api/analysis-draft/current to see the new draft when it lands.
 router.post("/api/analysis-draft/refresh", async (req, res) => {
   const user = req.user as { id: string };
-
-  const [c1Conversation] = await db
-    .select()
-    .from(conversations)
-    .where(eq(conversations.userId, user.id))
-    .orderBy(desc(conversations.updatedAt))
-    .limit(1);
-  if (!c1Conversation) return res.status(400).json({ error: "no_conversation" });
-
-  const [c1Analysis] = await db
-    .select()
-    .from(analyses)
-    .where(and(eq(analyses.userId, user.id), eq(analyses.status, "done")))
-    .orderBy(desc(analyses.createdAt))
-    .limit(1);
-  if (!c1Analysis) return res.status(400).json({ error: "no_analysis" });
-
-  const userStatements = await db
-    .select()
-    .from(statementsTable)
-    .where(eq(statementsTable.userId, user.id));
-
-  const [factsPrompt, prosePrompt, panelsPrompt] = await Promise.all([
-    getActivePrompt("analysis_facts"),
-    getActivePrompt("analysis_prose"),
-    getActivePrompt("analysis_panels"),
-  ]);
-  if (!factsPrompt || !prosePrompt || !panelsPrompt) {
-    return res.status(500).json({ error: "no_active_prompts" });
+  try {
+    const result = await refreshCanvas2Draft(user.id);
+    audit({
+      req,
+      action: "analysis_draft.refresh.start",
+      resourceType: "analysis_draft",
+      resourceId: String(result.draftId),
+    });
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown_error";
+    res.status(400).json({ error: "refresh_failed", message });
   }
-
-  // Mark any current draft as superseded — new one supersedes it.
-  await db
-    .update(analysisDrafts)
-    .set({ status: "superseded", supersededAt: new Date() })
-    .where(
-      and(
-        eq(analysisDrafts.userId, user.id),
-        isNull(analysisDrafts.supersededAt),
-      ),
-    );
-
-  const [created] = await db
-    .insert(analysisDrafts)
-    .values({
-      userId: user.id,
-      sourceConversationId: c1Conversation.id,
-      sourceAnalysisId: c1Analysis.id,
-      status: "thinking",
-    })
-    .returning();
-
-  audit({ req, action: "analysis_draft.refresh.start", resourceType: "analysis_draft", resourceId: String(created.id) });
-
-  res.json({ draftId: created.id, status: "thinking" });
-
-  void (async () => {
-    try {
-      const out = await buildAnalysisDraft({
-        prompts: {
-          facts: { id: factsPrompt.id, content: factsPrompt.content, model: factsPrompt.model },
-          prose: { id: prosePrompt.id, content: prosePrompt.content, model: prosePrompt.model },
-          panels: { id: panelsPrompt.id, content: panelsPrompt.content, model: panelsPrompt.model },
-        },
-        firstTakeAnalysis: c1Analysis.result,
-        conversationProfile: c1Conversation.profile,
-        flaggedIssues: c1Conversation.flaggedIssues ?? [],
-        statementSummaries: summariseStatements(userStatements),
-      });
-
-      await db
-        .update(analysisDrafts)
-        .set({
-          status: "ready",
-          facts: out.facts as unknown as object,
-          prose: out.prose as unknown as object,
-          panels: out.panels as unknown as object,
-          inputTokens: out.usage.inputTokens,
-          outputTokens: out.usage.outputTokens,
-          cacheReadTokens: out.usage.cacheReadTokens,
-          cacheCreationTokens: out.usage.cacheCreationTokens,
-          promptVersionIds: out.promptVersionIds as unknown as object,
-          generatedAt: new Date(),
-        })
-        .where(eq(analysisDrafts.id, created.id));
-
-      if (out.claims.length > 0) {
-        await db.insert(analysisClaims).values(
-          out.claims.map((c) => ({
-            draftId: created.id,
-            kind: c.kind,
-            anchorId: c.anchorId,
-            label: c.label,
-            category: c.category,
-            body: c.body,
-            evidenceRefs: c.evidenceRefs as unknown as object,
-          })),
-        );
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "unknown_error";
-      console.error("[analysis_draft.refresh] build failed:", err);
-      await db
-        .update(analysisDrafts)
-        .set({ status: "failed", errorMessage: message })
-        .where(eq(analysisDrafts.id, created.id));
-    }
-  })();
 });
 
 // GET /api/analysis-draft/:id/claims

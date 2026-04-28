@@ -51,6 +51,16 @@ function summariseStatements(rows: Statement[]): StatementSummary[] {
   });
 }
 
+// Extracted statement detail for the qa chat. Filters to only statements
+// that have an extraction result (no point sending nulls). Drops the
+// summary fields and just passes the verbatim extraction so Ally can
+// enumerate transactions on demand.
+function detailsFor(rows: Statement[]) {
+  return rows
+    .filter((s) => s.status === "extracted" && s.extractionResult != null)
+    .map((s) => ({ filename: s.filename, extraction: s.extractionResult }));
+}
+
 const router = Router();
 router.use(isAuthenticated);
 
@@ -118,6 +128,7 @@ router.get("/api/qa/conversation", async (req, res) => {
           phase: currentPhase,
           analysis: latestAnalysis.result,
           statements: summariseStatements(userStatements),
+          statementDetails: detailsFor(userStatements),
           profile: runningProfile,
           flaggedIssues: runningFlags,
           history: [],
@@ -248,6 +259,7 @@ router.post("/api/qa/start", async (req, res) => {
       phase,
       analysis: latestAnalysis?.result ?? null,
       statements: summariseStatements(userStatements),
+      statementDetails: detailsFor(userStatements),
       profile,
       flaggedIssues: [],
       history: [],
@@ -348,8 +360,10 @@ router.post("/api/qa/message", async (req, res) => {
       userId: user.id,
       prompt,
       user: { firstName: user.firstName, email: user.email },
+      phase,
       analysis: latestAnalysis?.result ?? null,
       statements: summariseStatements(userStatements),
+      statementDetails: detailsFor(userStatements),
       profile: runningProfile,
       flaggedIssues: runningFlags,
       history: historyForModel,

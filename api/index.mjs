@@ -1041,7 +1041,7 @@ var prompts_default = router4;
 
 // server/routes/analysis.ts
 import { Router as Router5 } from "express";
-import { and as and4, desc as desc5, eq as eq7, isNull } from "drizzle-orm";
+import { and as and5, desc as desc5, eq as eq8 } from "drizzle-orm";
 
 // server/modules/analysis/analyse.ts
 import Anthropic2 from "@anthropic-ai/sdk";
@@ -1214,26 +1214,98 @@ ${JSON.stringify(s.extraction)}
   return header + body + "\n\n" + tail.join("\n");
 }
 
+// server/modules/analysis/refresh.ts
+import { and as and4, eq as eq7, isNull } from "drizzle-orm";
+async function refreshCanvas1Analysis(userId) {
+  const sts = await db.select().from(statements).where(and4(eq7(statements.userId, userId), eq7(statements.status, "extracted")));
+  if (sts.length === 0) throw new Error("no_statements");
+  const prompt = await getActivePrompt("analysis");
+  if (!prompt) throw new Error("no_active_analysis_prompt");
+  const [conv] = await db.select().from(conversations).where(eq7(conversations.userId, userId)).limit(1);
+  const [created] = await db.insert(analyses).values({
+    userId,
+    status: "analysing",
+    promptVersionId: prompt.id,
+    sourceStatementIds: sts.map((s) => s.id)
+  }).returning();
+  void (async () => {
+    try {
+      const { result, usage } = await analyseStatements({
+        systemPrompt: prompt.content,
+        model: prompt.model,
+        statements: sts.map((s) => ({ filename: s.filename, extraction: s.extractionResult })),
+        conversationProfile: conv?.profile ?? null,
+        flaggedIssues: conv?.flaggedIssues ?? []
+      });
+      await db.update(analyses).set({
+        status: "done",
+        result,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cacheReadTokens: usage.cacheReadTokens,
+        cacheCreationTokens: usage.cacheCreationTokens,
+        completedAt: /* @__PURE__ */ new Date()
+      }).where(eq7(analyses.id, created.id));
+      await persistAnalysisClaims(created.id, result);
+      await db.update(subSteps).set({
+        contentJson: { analysisId: created.id },
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where(
+        and4(
+          eq7(subSteps.userId, userId),
+          eq7(subSteps.canvasKey, "picture"),
+          isNull(subSteps.supersededAt)
+        )
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "unknown_error";
+      console.error("[refreshCanvas1Analysis] failed:", err);
+      await db.update(analyses).set({ status: "failed", errorMessage: message, completedAt: /* @__PURE__ */ new Date() }).where(eq7(analyses.id, created.id));
+    }
+  })();
+  return { analysisId: created.id, status: "analysing" };
+}
+async function persistAnalysisClaims(analysisId, result) {
+  const r = result;
+  const claims = r.explainClaims ?? [];
+  if (claims.length === 0) return;
+  const phraseByAnchor = /* @__PURE__ */ new Map();
+  for (const a of r.lifeSnapshotAnnotations ?? []) phraseByAnchor.set(a.anchorId, a.phrase);
+  for (const a of r.income?.summaryAnnotations ?? []) phraseByAnchor.set(a.anchorId, a.phrase);
+  for (const a of r.spending?.summaryAnnotations ?? []) phraseByAnchor.set(a.anchorId, a.phrase);
+  for (const a of r.savings?.summaryAnnotations ?? []) phraseByAnchor.set(a.anchorId, a.phrase);
+  await db.insert(analysisClaims).values(
+    claims.map((c) => ({
+      analysisId,
+      kind: "explain",
+      anchorId: c.anchorId,
+      label: phraseByAnchor.get(c.anchorId) ?? c.label,
+      body: c.body,
+      evidenceRefs: { refs: c.evidenceRefs, chartKind: c.chartKind }
+    }))
+  );
+}
+
 // server/routes/analysis.ts
 var router5 = Router5();
 router5.use(isAuthenticated);
 router5.get("/api/analysis/latest", async (req, res) => {
   const user = req.user;
-  const [row] = await db.select().from(analyses).where(and4(eq7(analyses.userId, user.id), eq7(analyses.status, "done"))).orderBy(desc5(analyses.createdAt)).limit(1);
+  const [row] = await db.select().from(analyses).where(and5(eq8(analyses.userId, user.id), eq8(analyses.status, "done"))).orderBy(desc5(analyses.createdAt)).limit(1);
   res.json(row ?? null);
 });
 router5.get("/api/analysis/:id/claims", async (req, res) => {
   const user = req.user;
   const id = Number.parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
-  const [row] = await db.select().from(analyses).where(and4(eq7(analyses.id, id), eq7(analyses.userId, user.id))).limit(1);
+  const [row] = await db.select().from(analyses).where(and5(eq8(analyses.id, id), eq8(analyses.userId, user.id))).limit(1);
   if (!row) return res.status(404).json({ error: "not_found" });
-  const claims = await db.select().from(analysisClaims).where(eq7(analysisClaims.analysisId, id));
+  const claims = await db.select().from(analysisClaims).where(eq8(analysisClaims.analysisId, id));
   res.json(claims);
 });
 router5.post("/api/analysis/run", async (req, res) => {
   const user = req.user;
-  const sts = await db.select().from(statements).where(and4(eq7(statements.userId, user.id), eq7(statements.status, "extracted")));
+  const sts = await db.select().from(statements).where(and5(eq8(statements.userId, user.id), eq8(statements.status, "extracted")));
   if (sts.length === 0) {
     return res.status(400).json({ error: "no_statements" });
   }
@@ -1262,7 +1334,7 @@ router5.post("/api/analysis/run", async (req, res) => {
       cacheReadTokens: usage.cacheReadTokens,
       cacheCreationTokens: usage.cacheCreationTokens,
       completedAt: /* @__PURE__ */ new Date()
-    }).where(eq7(analyses.id, created.id)).returning();
+    }).where(eq8(analyses.id, created.id)).returning();
     await persistAnalysisClaims(created.id, result);
     audit({
       req,
@@ -1274,7 +1346,7 @@ router5.post("/api/analysis/run", async (req, res) => {
     res.json(finished);
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown_error";
-    await db.update(analyses).set({ status: "failed", errorMessage: message, completedAt: /* @__PURE__ */ new Date() }).where(eq7(analyses.id, created.id));
+    await db.update(analyses).set({ status: "failed", errorMessage: message, completedAt: /* @__PURE__ */ new Date() }).where(eq8(analyses.id, created.id));
     audit({
       req,
       action: "analysis.failure",
@@ -1288,84 +1360,24 @@ router5.post("/api/analysis/run", async (req, res) => {
 });
 router5.post("/api/analysis/refresh", async (req, res) => {
   const user = req.user;
-  const sts = await db.select().from(statements).where(and4(eq7(statements.userId, user.id), eq7(statements.status, "extracted")));
-  if (sts.length === 0) return res.status(400).json({ error: "no_statements" });
-  const prompt = await getActivePrompt("analysis");
-  if (!prompt) return res.status(500).json({ error: "no_active_analysis_prompt" });
-  const [conv] = await db.select().from(conversations).where(eq7(conversations.userId, user.id)).limit(1);
-  const [created] = await db.insert(analyses).values({
-    userId: user.id,
-    status: "analysing",
-    promptVersionId: prompt.id,
-    sourceStatementIds: sts.map((s) => s.id)
-  }).returning();
-  audit({ req, action: "analysis.refresh_start", resourceType: "analysis", resourceId: String(created.id) });
-  res.json({ analysisId: created.id, status: "analysing" });
-  void (async () => {
-    try {
-      const { result, usage } = await analyseStatements({
-        systemPrompt: prompt.content,
-        model: prompt.model,
-        statements: sts.map((s) => ({ filename: s.filename, extraction: s.extractionResult })),
-        conversationProfile: conv?.profile ?? null,
-        flaggedIssues: conv?.flaggedIssues ?? []
-      });
-      await db.update(analyses).set({
-        status: "done",
-        result,
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        cacheReadTokens: usage.cacheReadTokens,
-        cacheCreationTokens: usage.cacheCreationTokens,
-        completedAt: /* @__PURE__ */ new Date()
-      }).where(eq7(analyses.id, created.id));
-      await persistAnalysisClaims(created.id, result);
-      await db.update(subSteps).set({
-        contentJson: { analysisId: created.id },
-        updatedAt: /* @__PURE__ */ new Date()
-      }).where(
-        and4(
-          eq7(subSteps.userId, user.id),
-          eq7(subSteps.canvasKey, "picture"),
-          isNull(subSteps.supersededAt)
-        )
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "unknown_error";
-      console.error("[analysis.refresh] failed:", err);
-      await db.update(analyses).set({ status: "failed", errorMessage: message, completedAt: /* @__PURE__ */ new Date() }).where(eq7(analyses.id, created.id));
-    }
-  })();
+  try {
+    const result = await refreshCanvas1Analysis(user.id);
+    audit({ req, action: "analysis.refresh_start", resourceType: "analysis", resourceId: String(result.analysisId) });
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown_error";
+    res.status(400).json({ error: "refresh_failed", message });
+  }
 });
-async function persistAnalysisClaims(analysisId, result) {
-  const r = result;
-  const claims = r.explainClaims ?? [];
-  if (claims.length === 0) return;
-  const phraseByAnchor = /* @__PURE__ */ new Map();
-  for (const a of r.lifeSnapshotAnnotations ?? []) phraseByAnchor.set(a.anchorId, a.phrase);
-  for (const a of r.income?.summaryAnnotations ?? []) phraseByAnchor.set(a.anchorId, a.phrase);
-  for (const a of r.spending?.summaryAnnotations ?? []) phraseByAnchor.set(a.anchorId, a.phrase);
-  for (const a of r.savings?.summaryAnnotations ?? []) phraseByAnchor.set(a.anchorId, a.phrase);
-  await db.insert(analysisClaims).values(
-    claims.map((c) => ({
-      analysisId,
-      kind: "explain",
-      anchorId: c.anchorId,
-      label: phraseByAnchor.get(c.anchorId) ?? c.label,
-      body: c.body,
-      evidenceRefs: { refs: c.evidenceRefs, chartKind: c.chartKind }
-    }))
-  );
-}
 var analysis_default = router5;
 
 // server/routes/qa.ts
 import { Router as Router6 } from "express";
 import { z as z6 } from "zod";
-import { and as and9, asc as asc2, desc as desc9, eq as eq13 } from "drizzle-orm";
+import { and as and10, asc as asc2, desc as desc9, eq as eq14 } from "drizzle-orm";
 
 // server/modules/qa/persistTurn.ts
-import { and as and8, eq as eq12 } from "drizzle-orm";
+import { and as and9, eq as eq13 } from "drizzle-orm";
 
 // server/modules/qa/chat.ts
 import Anthropic3 from "@anthropic-ai/sdk";
@@ -1401,6 +1413,12 @@ var qaTurnResultSchema = z5.object({
   ),
   status: z5.enum(["continuing", "minimum_viable", "complete"]).describe(
     "continuing = more to gather; minimum_viable = enough for a picture but could gather more; complete = nothing essential left to gather."
+  ),
+  triggerRefresh: z5.boolean().default(false).describe(
+    "Set true when the user has just made a substantive correction to a fact that the rendered analysis depends on (e.g. 'that's not salary, it's self-funding from my business'; 'my real income is R30k, not R10k'; 'please update the picture based on what I just told you'). When true, the server kicks off a fresh analysis with the updated profile in context, and the rendered story re-renders. Set FALSE for soft acknowledgements, clarifying questions, and small chat updates that don't change the analysis."
+  ),
+  regenerateReason: z5.string().optional().describe(
+    "When triggerRefresh=true, a one-sentence summary of what the user corrected \u2014 the next analysis pass uses this as a hint. e.g. 'User corrected income: actual salary is R30k/month from The Herbal Horse, fragmented across multiple deposits.'"
   )
 });
 function emptyProfile() {
@@ -1487,6 +1505,16 @@ function buildStableContext(input) {
     );
   }
   sections.push("", "## Statements so far", statementsBlock, "");
+  if (input.statementDetails && input.statementDetails.length > 0) {
+    sections.push(
+      "## Full statement detail (every transaction)",
+      "Use this to enumerate evidence when the user asks about specific transactions, dates, deposits, or contests a number. Quote actual amounts and dates rather than summarising.",
+      ""
+    );
+    for (const d of input.statementDetails) {
+      sections.push(`### ${d.filename}`, "```json", JSON.stringify(d.extraction), "```", "");
+    }
+  }
   if (input.analysis) {
     sections.push(
       "## Their financial story (from the Analysis phase)",
@@ -1580,12 +1608,12 @@ function concatDedup(existing, incoming) {
 }
 
 // server/modules/stateChange/handlers.ts
-import { eq as eq11 } from "drizzle-orm";
+import { eq as eq12 } from "drizzle-orm";
 
 // server/modules/record/index.ts
-import { and as and5, asc, desc as desc6, eq as eq8, isNull as isNull2, or } from "drizzle-orm";
+import { and as and6, asc, desc as desc6, eq as eq9, isNull as isNull2, or } from "drizzle-orm";
 async function ensureRecord(userId) {
-  const [existing] = await db.select().from(record).where(eq8(record.userId, userId)).limit(1);
+  const [existing] = await db.select().from(record).where(eq9(record.userId, userId)).limit(1);
   if (existing) {
     const attrs = existing.attributes ?? {};
     if (!attrs.migratedFromLegacy) {
@@ -1593,7 +1621,7 @@ async function ensureRecord(userId) {
       await db.update(record).set({
         attributes: { ...attrs, migratedFromLegacy: true },
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq8(record.id, existing.id));
+      }).where(eq9(record.id, existing.id));
     }
     return existing;
   }
@@ -1602,11 +1630,11 @@ async function ensureRecord(userId) {
   await db.update(record).set({
     attributes: { migratedFromLegacy: true },
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq8(record.id, created.id));
+  }).where(eq9(record.id, created.id));
   return created;
 }
 async function lazyBackfillFromLegacy(userId, recordId) {
-  const [conv] = await db.select().from(conversations).where(eq8(conversations.userId, userId)).limit(1);
+  const [conv] = await db.select().from(conversations).where(eq9(conversations.userId, userId)).limit(1);
   if (conv) {
     const profile = conv.profile ?? {};
     for (const [key, value] of Object.entries(profile)) {
@@ -1638,9 +1666,9 @@ async function lazyBackfillFromLegacy(userId, recordId) {
       });
     }
   }
-  const [draft] = await db.select().from(analysisDrafts).where(and5(eq8(analysisDrafts.userId, userId), isNull2(analysisDrafts.supersededAt))).orderBy(desc6(analysisDrafts.createdAt)).limit(1);
+  const [draft] = await db.select().from(analysisDrafts).where(and6(eq9(analysisDrafts.userId, userId), isNull2(analysisDrafts.supersededAt))).orderBy(desc6(analysisDrafts.createdAt)).limit(1);
   if (draft) {
-    const claims = await db.select().from(analysisClaims).where(eq8(analysisClaims.draftId, draft.id));
+    const claims = await db.select().from(analysisClaims).where(eq9(analysisClaims.draftId, draft.id));
     for (const c of claims) {
       await db.insert(recordNotes).values({
         recordId,
@@ -1689,39 +1717,39 @@ async function supersedeNote(userId, oldNoteId, replacement) {
     supersededAt: /* @__PURE__ */ new Date(),
     supersededBy: replacementNote.id,
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(and5(eq8(recordNotes.id, oldNoteId), eq8(recordNotes.userId, userId)));
+  }).where(and6(eq9(recordNotes.id, oldNoteId), eq9(recordNotes.userId, userId)));
   return replacementNote;
 }
 async function softDeleteNote(userId, noteId) {
-  await db.update(recordNotes).set({ status: "deletion_pending", updatedAt: /* @__PURE__ */ new Date() }).where(and5(eq8(recordNotes.id, noteId), eq8(recordNotes.userId, userId)));
+  await db.update(recordNotes).set({ status: "deletion_pending", updatedAt: /* @__PURE__ */ new Date() }).where(and6(eq9(recordNotes.id, noteId), eq9(recordNotes.userId, userId)));
 }
 async function listNotes(filter) {
   await ensureRecord(filter.userId);
-  const statusClause = filter.includeDeletionPending ? or(eq8(recordNotes.status, "active"), eq8(recordNotes.status, "declined")) : eq8(recordNotes.status, "active");
+  const statusClause = filter.includeDeletionPending ? or(eq9(recordNotes.status, "active"), eq9(recordNotes.status, "declined")) : eq9(recordNotes.status, "active");
   if (filter.segmentId != null) {
-    const rows = await db.select({ note: recordNotes }).from(recordNoteSegments).innerJoin(recordNotes, eq8(recordNotes.id, recordNoteSegments.noteId)).where(
-      and5(
-        eq8(recordNoteSegments.segmentId, filter.segmentId),
-        eq8(recordNotes.userId, filter.userId),
+    const rows = await db.select({ note: recordNotes }).from(recordNoteSegments).innerJoin(recordNotes, eq9(recordNotes.id, recordNoteSegments.noteId)).where(
+      and6(
+        eq9(recordNoteSegments.segmentId, filter.segmentId),
+        eq9(recordNotes.userId, filter.userId),
         statusClause,
-        filter.category ? eq8(recordNotes.category, filter.category) : void 0,
-        filter.kind ? eq8(recordNotes.kind, filter.kind) : void 0
+        filter.category ? eq9(recordNotes.category, filter.category) : void 0,
+        filter.kind ? eq9(recordNotes.kind, filter.kind) : void 0
       )
     ).orderBy(desc6(recordNotes.establishedAt)).limit(filter.limit ?? 200);
     return rows.map((r) => r.note);
   }
   return db.select().from(recordNotes).where(
-    and5(
-      eq8(recordNotes.userId, filter.userId),
+    and6(
+      eq9(recordNotes.userId, filter.userId),
       statusClause,
-      filter.category ? eq8(recordNotes.category, filter.category) : void 0,
-      filter.kind ? eq8(recordNotes.kind, filter.kind) : void 0
+      filter.category ? eq9(recordNotes.category, filter.category) : void 0,
+      filter.kind ? eq9(recordNotes.kind, filter.kind) : void 0
     )
   ).orderBy(desc6(recordNotes.establishedAt)).limit(filter.limit ?? 200);
 }
 async function listSegments(userId) {
   await ensureRecord(userId);
-  return db.select().from(recordSegments).where(eq8(recordSegments.userId, userId)).orderBy(asc(recordSegments.startedAt));
+  return db.select().from(recordSegments).where(eq9(recordSegments.userId, userId)).orderBy(asc(recordSegments.startedAt));
 }
 async function triggerMetaSynthesis(userId, trigger, context) {
   await ensureRecord(userId);
@@ -1739,7 +1767,7 @@ function humanise(key) {
 }
 
 // server/modules/checklist/derive.ts
-import { and as and6, desc as desc7, eq as eq9 } from "drizzle-orm";
+import { and as and7, desc as desc7, eq as eq10 } from "drizzle-orm";
 var PICTURE_FIELDS = [
   { key: "retirement", label: "Retirement", importance: "core" },
   { key: "debt", label: "Debt", importance: "core" },
@@ -1767,9 +1795,9 @@ async function deriveChecklist(userId, subStep) {
   return { canvas: subStep.canvasKey, beat: subStep.beat, items: [], agreementReady: true };
 }
 async function derivePictureChecklist(userId, subStep) {
-  const [conv] = await db.select().from(conversations).where(eq9(conversations.userId, userId)).limit(1);
+  const [conv] = await db.select().from(conversations).where(eq10(conversations.userId, userId)).limit(1);
   const profile = conv?.profile ?? emptyProfile();
-  const skipped = await db.select().from(recordNotes).where(and6(eq9(recordNotes.userId, userId), eq9(recordNotes.kind, "skipped_gap")));
+  const skipped = await db.select().from(recordNotes).where(and7(eq10(recordNotes.userId, userId), eq10(recordNotes.kind, "skipped_gap")));
   const skippedByCategory = /* @__PURE__ */ new Map();
   for (const n of skipped) {
     if (n.category) skippedByCategory.set(n.category, n.body);
@@ -1806,20 +1834,20 @@ async function deriveAnalysisChecklist(userId, subStep) {
   if (!content.draftId) {
     return { canvas: "analysis", beat: "discuss", items: [], agreementReady: false };
   }
-  const [draft] = await db.select().from(analysisDrafts).where(eq9(analysisDrafts.id, content.draftId)).limit(1);
+  const [draft] = await db.select().from(analysisDrafts).where(eq10(analysisDrafts.id, content.draftId)).limit(1);
   if (!draft) {
     return { canvas: "analysis", beat: "discuss", items: [], agreementReady: false };
   }
   const prose = draft.prose ?? {};
   const sections = prose.sections ?? [];
-  const [conv] = await db.select().from(analysisConversations).where(eq9(analysisConversations.draftId, draft.id)).orderBy(desc7(analysisConversations.startedAt)).limit(1);
+  const [conv] = await db.select().from(analysisConversations).where(eq10(analysisConversations.draftId, draft.id)).orderBy(desc7(analysisConversations.startedAt)).limit(1);
   const userTurnCount = conv ? (await db.select().from(analysisConversationMessages).where(
-    and6(
-      eq9(analysisConversationMessages.analysisConversationId, conv.id),
-      eq9(analysisConversationMessages.role, "user")
+    and7(
+      eq10(analysisConversationMessages.analysisConversationId, conv.id),
+      eq10(analysisConversationMessages.role, "user")
     )
   )).length : 0;
-  const skipped = await db.select().from(recordNotes).where(and6(eq9(recordNotes.userId, userId), eq9(recordNotes.kind, "skipped_gap")));
+  const skipped = await db.select().from(recordNotes).where(and7(eq10(recordNotes.userId, userId), eq10(recordNotes.kind, "skipped_gap")));
   const skippedByCategory = /* @__PURE__ */ new Map();
   for (const n of skipped) {
     if (n.category) skippedByCategory.set(n.category, n.body);
@@ -1845,7 +1873,7 @@ function humaniseSectionId(s) {
 }
 
 // server/modules/stateChange/messages.ts
-import { desc as desc8, eq as eq10 } from "drizzle-orm";
+import { desc as desc8, eq as eq11 } from "drizzle-orm";
 var OPENERS = {
   picture_live: "Done. That's your picture, agreed. I'll be here if anything changes \u2014 just shout.",
   analysis_live: "Agreed. That's your analysis on the record. I'm here if you want to come back to it.",
@@ -1872,7 +1900,7 @@ var TOPIC_STARTERS = {
 };
 async function postAllyMessage(input) {
   if (input.canvas === "picture") {
-    const [conv] = await db.select().from(conversations).where(eq10(conversations.userId, input.userId)).limit(1);
+    const [conv] = await db.select().from(conversations).where(eq11(conversations.userId, input.userId)).limit(1);
     if (!conv) return null;
     const [msg] = await db.insert(conversationMessages).values({
       conversationId: conv.id,
@@ -1883,7 +1911,7 @@ async function postAllyMessage(input) {
     return msg.id;
   }
   if (input.canvas === "analysis") {
-    const [conv] = await db.select().from(analysisConversations).where(eq10(analysisConversations.userId, input.userId)).orderBy(desc8(analysisConversations.startedAt)).limit(1);
+    const [conv] = await db.select().from(analysisConversations).where(eq11(analysisConversations.userId, input.userId)).orderBy(desc8(analysisConversations.startedAt)).limit(1);
     if (!conv) return null;
     const [msg] = await db.insert(analysisConversationMessages).values({
       analysisConversationId: conv.id,
@@ -2055,7 +2083,7 @@ ${opener ?? ""}`.trim() : opener;
 async function buildAgreementRecap(ctx) {
   if (!ctx.subStepId) return null;
   try {
-    const [sub] = await db.select().from(subSteps).where(eq11(subSteps.id, ctx.subStepId)).limit(1);
+    const [sub] = await db.select().from(subSteps).where(eq12(subSteps.id, ctx.subStepId)).limit(1);
     if (!sub) return null;
     const checklist = await deriveChecklist(ctx.userId, sub);
     const covered = checklist.items.filter((i) => i.status === "covered");
@@ -2143,6 +2171,7 @@ async function runAndPersistTurn(input) {
     phase: input.phase,
     analysis: input.analysis,
     statements: input.statements,
+    statementDetails: input.statementDetails,
     profile: input.profile,
     flaggedIssues: input.flaggedIssues,
     history: input.history,
@@ -2171,7 +2200,7 @@ async function runAndPersistTurn(input) {
     status: newStatus,
     updatedAt: /* @__PURE__ */ new Date(),
     completedAt: newStatus === "complete" ? /* @__PURE__ */ new Date() : null
-  }).where(and8(eq12(conversations.id, input.conversationId), eq12(conversations.userId, input.userId))).returning();
+  }).where(and9(eq13(conversations.id, input.conversationId), eq13(conversations.userId, input.userId))).returning();
   const deltas = diffProfile(input.profile, mergedProfile);
   const newFlags = mergedFlags.filter((f) => !input.flaggedIssues.includes(f));
   if (Object.keys(deltas).length > 0 || newFlags.length > 0) {
@@ -2192,6 +2221,11 @@ async function runAndPersistTurn(input) {
         sourceSubStepId: null
       }
     }).catch(() => {
+    });
+  }
+  if (result.triggerRefresh) {
+    refreshCanvas1Analysis(input.userId).catch((err) => {
+      console.warn("[runAndPersistTurn] auto-refresh failed:", err);
     });
   }
   return { conversation, assistantMessage };
@@ -2248,6 +2282,9 @@ function summariseStatements(rows) {
     };
   });
 }
+function detailsFor(rows) {
+  return rows.filter((s) => s.status === "extracted" && s.extractionResult != null).map((s) => ({ filename: s.filename, extraction: s.extractionResult }));
+}
 var router6 = Router6();
 router6.use(isAuthenticated);
 var messageBodySchema = z6.object({
@@ -2256,17 +2293,17 @@ var messageBodySchema = z6.object({
 var MAX_HISTORY_MESSAGES = 6;
 router6.get("/api/qa/conversation", async (req, res) => {
   const user = req.user;
-  const [conversation] = await db.select().from(conversations).where(eq13(conversations.userId, user.id)).limit(1);
+  const [conversation] = await db.select().from(conversations).where(eq14(conversations.userId, user.id)).limit(1);
   if (!conversation) {
     return res.json({ conversation: null, messages: [] });
   }
-  const [latestAnalysis] = await db.select().from(analyses).where(and9(eq13(analyses.userId, user.id), eq13(analyses.status, "done"))).orderBy(desc9(analyses.createdAt)).limit(1);
+  const [latestAnalysis] = await db.select().from(analyses).where(and10(eq14(analyses.userId, user.id), eq14(analyses.status, "done"))).orderBy(desc9(analyses.createdAt)).limit(1);
   const currentPhase = derivePhase(user.buildCompletedAt, latestAnalysis?.result);
   const needsTransitionOpener = currentPhase === "first_take_gaps" && latestAnalysis?.id !== void 0 && latestAnalysis.id !== conversation.analysisIdAtStart;
   if (needsTransitionOpener && latestAnalysis?.result) {
     const prompt = await getActivePrompt("qa");
     if (prompt) {
-      const userStatements = await db.select().from(statements).where(eq13(statements.userId, user.id));
+      const userStatements = await db.select().from(statements).where(eq14(statements.userId, user.id));
       const runningProfile = conversation.profile ?? emptyProfile();
       const runningFlags = conversation.flaggedIssues ?? [];
       try {
@@ -2278,6 +2315,7 @@ router6.get("/api/qa/conversation", async (req, res) => {
           phase: currentPhase,
           analysis: latestAnalysis.result,
           statements: summariseStatements(userStatements),
+          statementDetails: detailsFor(userStatements),
           profile: runningProfile,
           flaggedIssues: runningFlags,
           history: [],
@@ -2285,7 +2323,7 @@ router6.get("/api/qa/conversation", async (req, res) => {
           latestUser: null,
           isTransition: true
         });
-        await db.update(conversations).set({ analysisIdAtStart: latestAnalysis.id, updatedAt: /* @__PURE__ */ new Date() }).where(eq13(conversations.id, conversation.id));
+        await db.update(conversations).set({ analysisIdAtStart: latestAnalysis.id, updatedAt: /* @__PURE__ */ new Date() }).where(eq14(conversations.id, conversation.id));
         audit({
           req,
           action: "qa.phase_transition_opener",
@@ -2298,7 +2336,7 @@ router6.get("/api/qa/conversation", async (req, res) => {
       }
     }
   }
-  const [latestMsg] = await db.select({ createdAt: conversationMessages.createdAt }).from(conversationMessages).where(eq13(conversationMessages.conversationId, conversation.id)).orderBy(desc9(conversationMessages.createdAt)).limit(1);
+  const [latestMsg] = await db.select({ createdAt: conversationMessages.createdAt }).from(conversationMessages).where(eq14(conversationMessages.conversationId, conversation.id)).orderBy(desc9(conversationMessages.createdAt)).limit(1);
   if (conversation.status === "active" && isStale(latestMsg?.createdAt ?? null)) {
     await onStateChange({
       userId: user.id,
@@ -2307,21 +2345,21 @@ router6.get("/api/qa/conversation", async (req, res) => {
       payload: { canvas: "picture", beat: "discuss" }
     });
   }
-  const [refreshed] = await db.select().from(conversations).where(eq13(conversations.id, conversation.id)).limit(1);
+  const [refreshed] = await db.select().from(conversations).where(eq14(conversations.id, conversation.id)).limit(1);
   const messages = await loadMessages(conversation.id);
   res.json({ conversation: refreshed ?? conversation, messages });
 });
 router6.post("/api/qa/start", async (req, res) => {
   const user = req.user;
-  const [existing] = await db.select().from(conversations).where(eq13(conversations.userId, user.id)).limit(1);
+  const [existing] = await db.select().from(conversations).where(eq14(conversations.userId, user.id)).limit(1);
   if (existing) {
     const existingMessages = await loadMessages(existing.id);
     if (existingMessages.length > 0) {
       return res.json({ conversation: existing, messages: existingMessages });
     }
   }
-  const [latestAnalysis] = await db.select().from(analyses).where(and9(eq13(analyses.userId, user.id), eq13(analyses.status, "done"))).orderBy(desc9(analyses.createdAt)).limit(1);
-  const userStatements = await db.select().from(statements).where(eq13(statements.userId, user.id));
+  const [latestAnalysis] = await db.select().from(analyses).where(and10(eq14(analyses.userId, user.id), eq14(analyses.status, "done"))).orderBy(desc9(analyses.createdAt)).limit(1);
+  const userStatements = await db.select().from(statements).where(eq14(statements.userId, user.id));
   const phase = derivePhase(user.buildCompletedAt, latestAnalysis?.result);
   const promptKey = phase === "first_take_gaps" ? "qa" : "qa_bring_it_in";
   const prompt = await getActivePrompt(promptKey);
@@ -2352,6 +2390,7 @@ router6.post("/api/qa/start", async (req, res) => {
       phase,
       analysis: latestAnalysis?.result ?? null,
       statements: summariseStatements(userStatements),
+      statementDetails: detailsFor(userStatements),
       profile,
       flaggedIssues: [],
       history: [],
@@ -2380,15 +2419,15 @@ router6.post("/api/qa/message", async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ error: "invalid_input", detail: parsed.error.flatten() });
   }
-  const [conversation] = await db.select().from(conversations).where(eq13(conversations.userId, user.id)).limit(1);
+  const [conversation] = await db.select().from(conversations).where(eq14(conversations.userId, user.id)).limit(1);
   if (!conversation) {
     return res.status(404).json({ error: "no_conversation" });
   }
   if (conversation.status === "complete") {
     return res.status(400).json({ error: "conversation_complete" });
   }
-  const [latestAnalysis] = await db.select().from(analyses).where(and9(eq13(analyses.userId, user.id), eq13(analyses.status, "done"))).orderBy(desc9(analyses.createdAt)).limit(1);
-  const userStatements = await db.select().from(statements).where(eq13(statements.userId, user.id));
+  const [latestAnalysis] = await db.select().from(analyses).where(and10(eq14(analyses.userId, user.id), eq14(analyses.status, "done"))).orderBy(desc9(analyses.createdAt)).limit(1);
+  const userStatements = await db.select().from(statements).where(eq14(statements.userId, user.id));
   const phase = derivePhase(user.buildCompletedAt, latestAnalysis?.result);
   const promptKey = phase === "first_take_gaps" ? "qa" : "qa_bring_it_in";
   const prompt = await getActivePrompt(promptKey);
@@ -2418,8 +2457,10 @@ router6.post("/api/qa/message", async (req, res) => {
       userId: user.id,
       prompt,
       user: { firstName: user.firstName, email: user.email },
+      phase,
       analysis: latestAnalysis?.result ?? null,
       statements: summariseStatements(userStatements),
+      statementDetails: detailsFor(userStatements),
       profile: runningProfile,
       flaggedIssues: runningFlags,
       history: historyForModel,
@@ -2451,7 +2492,7 @@ router6.post("/api/qa/message", async (req, res) => {
 });
 router6.post("/api/qa/pause", async (req, res) => {
   const user = req.user;
-  const [updated] = await db.update(conversations).set({ status: "paused", updatedAt: /* @__PURE__ */ new Date() }).where(and9(eq13(conversations.userId, user.id), eq13(conversations.status, "active"))).returning();
+  const [updated] = await db.update(conversations).set({ status: "paused", updatedAt: /* @__PURE__ */ new Date() }).where(and10(eq14(conversations.userId, user.id), eq14(conversations.status, "active"))).returning();
   if (!updated) {
     return res.status(404).json({ error: "no_active_conversation" });
   }
@@ -2465,7 +2506,7 @@ router6.post("/api/qa/pause", async (req, res) => {
 });
 router6.post("/api/qa/complete", async (req, res) => {
   const user = req.user;
-  const [updated] = await db.update(conversations).set({ status: "complete", completedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq13(conversations.userId, user.id)).returning();
+  const [updated] = await db.update(conversations).set({ status: "complete", completedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq14(conversations.userId, user.id)).returning();
   if (!updated) {
     return res.status(404).json({ error: "no_conversation" });
   }
@@ -2479,13 +2520,13 @@ router6.post("/api/qa/complete", async (req, res) => {
   res.json(updated);
 });
 async function loadMessages(conversationId) {
-  return db.select().from(conversationMessages).where(eq13(conversationMessages.conversationId, conversationId)).orderBy(asc2(conversationMessages.createdAt), asc2(conversationMessages.id));
+  return db.select().from(conversationMessages).where(eq14(conversationMessages.conversationId, conversationId)).orderBy(asc2(conversationMessages.createdAt), asc2(conversationMessages.id));
 }
 var qa_default = router6;
 
 // server/routes/analysisDraft.ts
 import { Router as Router7 } from "express";
-import { and as and10, desc as desc10, eq as eq14, isNull as isNull3 } from "drizzle-orm";
+import { and as and12, desc as desc11, eq as eq16, isNull as isNull4 } from "drizzle-orm";
 
 // server/modules/analysisDraft/claude.ts
 import Anthropic4 from "@anthropic-ai/sdk";
@@ -2821,9 +2862,8 @@ function addAnnotation(acc, ann, prose, panels, facts) {
   }
 }
 
-// server/routes/analysisDraft.ts
-var router7 = Router7();
-router7.use(isAuthenticated);
+// server/modules/analysisDraft/refresh.ts
+import { and as and11, desc as desc10, eq as eq15, isNull as isNull3 } from "drizzle-orm";
 function summariseStatements2(rows) {
   return rows.map((s) => {
     const r = s.extractionResult ?? null;
@@ -2836,8 +2876,96 @@ function summariseStatements2(rows) {
     };
   });
 }
+async function refreshCanvas2Draft(userId) {
+  const [c1Conversation] = await db.select().from(conversations).where(eq15(conversations.userId, userId)).orderBy(desc10(conversations.updatedAt)).limit(1);
+  if (!c1Conversation) throw new Error("no_conversation");
+  const [c1Analysis] = await db.select().from(analyses).where(and11(eq15(analyses.userId, userId), eq15(analyses.status, "done"))).orderBy(desc10(analyses.createdAt)).limit(1);
+  if (!c1Analysis) throw new Error("no_analysis");
+  const userStatements = await db.select().from(statements).where(eq15(statements.userId, userId));
+  const [factsPrompt, prosePrompt, panelsPrompt] = await Promise.all([
+    getActivePrompt("analysis_facts"),
+    getActivePrompt("analysis_prose"),
+    getActivePrompt("analysis_panels")
+  ]);
+  if (!factsPrompt || !prosePrompt || !panelsPrompt) {
+    throw new Error("no_active_prompts");
+  }
+  await db.update(analysisDrafts).set({ status: "superseded", supersededAt: /* @__PURE__ */ new Date() }).where(
+    and11(
+      eq15(analysisDrafts.userId, userId),
+      isNull3(analysisDrafts.supersededAt)
+    )
+  );
+  const [created] = await db.insert(analysisDrafts).values({
+    userId,
+    sourceConversationId: c1Conversation.id,
+    sourceAnalysisId: c1Analysis.id,
+    status: "thinking"
+  }).returning();
+  void (async () => {
+    try {
+      const out = await buildAnalysisDraft({
+        prompts: {
+          facts: { id: factsPrompt.id, content: factsPrompt.content, model: factsPrompt.model },
+          prose: { id: prosePrompt.id, content: prosePrompt.content, model: prosePrompt.model },
+          panels: { id: panelsPrompt.id, content: panelsPrompt.content, model: panelsPrompt.model }
+        },
+        firstTakeAnalysis: c1Analysis.result,
+        conversationProfile: c1Conversation.profile,
+        flaggedIssues: c1Conversation.flaggedIssues ?? [],
+        statementSummaries: summariseStatements2(userStatements)
+      });
+      await db.update(analysisDrafts).set({
+        status: "ready",
+        facts: out.facts,
+        prose: out.prose,
+        panels: out.panels,
+        inputTokens: out.usage.inputTokens,
+        outputTokens: out.usage.outputTokens,
+        cacheReadTokens: out.usage.cacheReadTokens,
+        cacheCreationTokens: out.usage.cacheCreationTokens,
+        promptVersionIds: out.promptVersionIds,
+        generatedAt: /* @__PURE__ */ new Date()
+      }).where(eq15(analysisDrafts.id, created.id));
+      if (out.claims.length > 0) {
+        await db.insert(analysisClaims).values(
+          out.claims.map((c) => ({
+            draftId: created.id,
+            kind: c.kind,
+            anchorId: c.anchorId,
+            label: c.label,
+            category: c.category,
+            body: c.body,
+            evidenceRefs: c.evidenceRefs
+          }))
+        );
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "unknown_error";
+      console.error("[refreshCanvas2Draft] build failed:", err);
+      await db.update(analysisDrafts).set({ status: "failed", errorMessage: message }).where(eq15(analysisDrafts.id, created.id));
+    }
+  })();
+  return { draftId: created.id, status: "thinking" };
+}
+
+// server/routes/analysisDraft.ts
+var router7 = Router7();
+router7.use(isAuthenticated);
+function summariseStatements3(rows) {
+  return rows.map((s) => {
+    const r = s.extractionResult ?? null;
+    return {
+      filename: s.filename,
+      bankName: r?.bankName ?? null,
+      periodStart: r?.statementPeriodStart ?? null,
+      periodEnd: r?.statementPeriodEnd ?? null,
+      transactionCount: Array.isArray(r?.transactions) ? r.transactions.length : null
+    };
+  });
+}
 async function getCurrentDraft(userId) {
-  const [row] = await db.select().from(analysisDrafts).where(and10(eq14(analysisDrafts.userId, userId), isNull3(analysisDrafts.supersededAt))).orderBy(desc10(analysisDrafts.createdAt)).limit(1);
+  const [row] = await db.select().from(analysisDrafts).where(and12(eq16(analysisDrafts.userId, userId), isNull4(analysisDrafts.supersededAt))).orderBy(desc11(analysisDrafts.createdAt)).limit(1);
   return row ?? null;
 }
 router7.post("/api/analysis-draft/generate", async (req, res) => {
@@ -2846,11 +2974,11 @@ router7.post("/api/analysis-draft/generate", async (req, res) => {
   if (existing && existing.status !== "failed") {
     return res.json(existing);
   }
-  const [c1Conversation] = await db.select().from(conversations).where(and10(eq14(conversations.userId, user.id), eq14(conversations.status, "complete"))).orderBy(desc10(conversations.completedAt)).limit(1);
+  const [c1Conversation] = await db.select().from(conversations).where(and12(eq16(conversations.userId, user.id), eq16(conversations.status, "complete"))).orderBy(desc11(conversations.completedAt)).limit(1);
   if (!c1Conversation) return res.status(400).json({ error: "canvas_1_not_agreed" });
-  const [c1Analysis] = await db.select().from(analyses).where(and10(eq14(analyses.userId, user.id), eq14(analyses.status, "done"))).orderBy(desc10(analyses.createdAt)).limit(1);
+  const [c1Analysis] = await db.select().from(analyses).where(and12(eq16(analyses.userId, user.id), eq16(analyses.status, "done"))).orderBy(desc11(analyses.createdAt)).limit(1);
   if (!c1Analysis) return res.status(400).json({ error: "no_analysis" });
-  const userStatements = await db.select().from(statements).where(eq14(statements.userId, user.id));
+  const userStatements = await db.select().from(statements).where(eq16(statements.userId, user.id));
   const [factsPrompt, prosePrompt, panelsPrompt] = await Promise.all([
     getActivePrompt("analysis_facts"),
     getActivePrompt("analysis_prose"),
@@ -2881,7 +3009,7 @@ router7.post("/api/analysis-draft/generate", async (req, res) => {
       firstTakeAnalysis: c1Analysis.result,
       conversationProfile: c1Conversation.profile,
       flaggedIssues: c1Conversation.flaggedIssues ?? [],
-      statementSummaries: summariseStatements2(userStatements)
+      statementSummaries: summariseStatements3(userStatements)
     });
     const [finished] = await db.update(analysisDrafts).set({
       status: "ready",
@@ -2894,7 +3022,7 @@ router7.post("/api/analysis-draft/generate", async (req, res) => {
       cacheCreationTokens: out.usage.cacheCreationTokens,
       promptVersionIds: out.promptVersionIds,
       generatedAt: /* @__PURE__ */ new Date()
-    }).where(and10(eq14(analysisDrafts.id, created.id), eq14(analysisDrafts.userId, user.id))).returning();
+    }).where(and12(eq16(analysisDrafts.id, created.id), eq16(analysisDrafts.userId, user.id))).returning();
     if (out.claims.length > 0) {
       await db.insert(analysisClaims).values(
         out.claims.map((c) => ({
@@ -2936,7 +3064,7 @@ router7.post("/api/analysis-draft/generate", async (req, res) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown_error";
     console.error("[analysis_draft.generate] build failed:", err);
-    await db.update(analysisDrafts).set({ status: "failed", errorMessage: message }).where(and10(eq14(analysisDrafts.id, created.id), eq14(analysisDrafts.userId, user.id)));
+    await db.update(analysisDrafts).set({ status: "failed", errorMessage: message }).where(and12(eq16(analysisDrafts.id, created.id), eq16(analysisDrafts.userId, user.id)));
     audit({
       req,
       action: "analysis_draft.generate.failure",
@@ -2957,7 +3085,7 @@ router7.get("/api/analysis-draft/:id", async (req, res) => {
   const user = req.user;
   const id = Number.parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
-  const [row] = await db.select().from(analysisDrafts).where(and10(eq14(analysisDrafts.id, id), eq14(analysisDrafts.userId, user.id))).limit(1);
+  const [row] = await db.select().from(analysisDrafts).where(and12(eq16(analysisDrafts.id, id), eq16(analysisDrafts.userId, user.id))).limit(1);
   if (!row) return res.status(404).json({ error: "not_found" });
   res.json(row);
 });
@@ -2965,17 +3093,17 @@ router7.post("/api/analysis-draft/:id/agree", async (req, res) => {
   const user = req.user;
   const id = Number.parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
-  const [row] = await db.select().from(analysisDrafts).where(and10(eq14(analysisDrafts.id, id), eq14(analysisDrafts.userId, user.id))).limit(1);
+  const [row] = await db.select().from(analysisDrafts).where(and12(eq16(analysisDrafts.id, id), eq16(analysisDrafts.userId, user.id))).limit(1);
   if (!row) return res.status(404).json({ error: "not_found" });
   if (row.status !== "ready") {
     return res.status(400).json({ error: "not_ready", status: row.status });
   }
-  const [agreed] = await db.update(analysisDrafts).set({ status: "agreed", agreedAt: /* @__PURE__ */ new Date() }).where(and10(eq14(analysisDrafts.id, id), eq14(analysisDrafts.userId, user.id))).returning();
+  const [agreed] = await db.update(analysisDrafts).set({ status: "agreed", agreedAt: /* @__PURE__ */ new Date() }).where(and12(eq16(analysisDrafts.id, id), eq16(analysisDrafts.userId, user.id))).returning();
   await db.update(analysisConversations).set({ status: "complete", completedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(
-    and10(
-      eq14(analysisConversations.userId, user.id),
-      eq14(analysisConversations.draftId, id),
-      eq14(analysisConversations.status, "active")
+    and12(
+      eq16(analysisConversations.userId, user.id),
+      eq16(analysisConversations.draftId, id),
+      eq16(analysisConversations.status, "active")
     )
   );
   audit({
@@ -2990,12 +3118,12 @@ router7.post("/api/analysis-draft/:id/reopen", async (req, res) => {
   const user = req.user;
   const id = Number.parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
-  const [row] = await db.select().from(analysisDrafts).where(and10(eq14(analysisDrafts.id, id), eq14(analysisDrafts.userId, user.id))).limit(1);
+  const [row] = await db.select().from(analysisDrafts).where(and12(eq16(analysisDrafts.id, id), eq16(analysisDrafts.userId, user.id))).limit(1);
   if (!row) return res.status(404).json({ error: "not_found" });
   if (row.status !== "ready" && row.status !== "agreed") {
     return res.status(400).json({ error: "not_reopenable", status: row.status });
   }
-  await db.update(analysisDrafts).set({ status: "superseded", supersededAt: /* @__PURE__ */ new Date() }).where(and10(eq14(analysisDrafts.id, id), eq14(analysisDrafts.userId, user.id)));
+  await db.update(analysisDrafts).set({ status: "superseded", supersededAt: /* @__PURE__ */ new Date() }).where(and12(eq16(analysisDrafts.id, id), eq16(analysisDrafts.userId, user.id)));
   audit({
     req,
     action: "analysis_draft.reopen",
@@ -3006,85 +3134,27 @@ router7.post("/api/analysis-draft/:id/reopen", async (req, res) => {
 });
 router7.post("/api/analysis-draft/refresh", async (req, res) => {
   const user = req.user;
-  const [c1Conversation] = await db.select().from(conversations).where(eq14(conversations.userId, user.id)).orderBy(desc10(conversations.updatedAt)).limit(1);
-  if (!c1Conversation) return res.status(400).json({ error: "no_conversation" });
-  const [c1Analysis] = await db.select().from(analyses).where(and10(eq14(analyses.userId, user.id), eq14(analyses.status, "done"))).orderBy(desc10(analyses.createdAt)).limit(1);
-  if (!c1Analysis) return res.status(400).json({ error: "no_analysis" });
-  const userStatements = await db.select().from(statements).where(eq14(statements.userId, user.id));
-  const [factsPrompt, prosePrompt, panelsPrompt] = await Promise.all([
-    getActivePrompt("analysis_facts"),
-    getActivePrompt("analysis_prose"),
-    getActivePrompt("analysis_panels")
-  ]);
-  if (!factsPrompt || !prosePrompt || !panelsPrompt) {
-    return res.status(500).json({ error: "no_active_prompts" });
+  try {
+    const result = await refreshCanvas2Draft(user.id);
+    audit({
+      req,
+      action: "analysis_draft.refresh.start",
+      resourceType: "analysis_draft",
+      resourceId: String(result.draftId)
+    });
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown_error";
+    res.status(400).json({ error: "refresh_failed", message });
   }
-  await db.update(analysisDrafts).set({ status: "superseded", supersededAt: /* @__PURE__ */ new Date() }).where(
-    and10(
-      eq14(analysisDrafts.userId, user.id),
-      isNull3(analysisDrafts.supersededAt)
-    )
-  );
-  const [created] = await db.insert(analysisDrafts).values({
-    userId: user.id,
-    sourceConversationId: c1Conversation.id,
-    sourceAnalysisId: c1Analysis.id,
-    status: "thinking"
-  }).returning();
-  audit({ req, action: "analysis_draft.refresh.start", resourceType: "analysis_draft", resourceId: String(created.id) });
-  res.json({ draftId: created.id, status: "thinking" });
-  void (async () => {
-    try {
-      const out = await buildAnalysisDraft({
-        prompts: {
-          facts: { id: factsPrompt.id, content: factsPrompt.content, model: factsPrompt.model },
-          prose: { id: prosePrompt.id, content: prosePrompt.content, model: prosePrompt.model },
-          panels: { id: panelsPrompt.id, content: panelsPrompt.content, model: panelsPrompt.model }
-        },
-        firstTakeAnalysis: c1Analysis.result,
-        conversationProfile: c1Conversation.profile,
-        flaggedIssues: c1Conversation.flaggedIssues ?? [],
-        statementSummaries: summariseStatements2(userStatements)
-      });
-      await db.update(analysisDrafts).set({
-        status: "ready",
-        facts: out.facts,
-        prose: out.prose,
-        panels: out.panels,
-        inputTokens: out.usage.inputTokens,
-        outputTokens: out.usage.outputTokens,
-        cacheReadTokens: out.usage.cacheReadTokens,
-        cacheCreationTokens: out.usage.cacheCreationTokens,
-        promptVersionIds: out.promptVersionIds,
-        generatedAt: /* @__PURE__ */ new Date()
-      }).where(eq14(analysisDrafts.id, created.id));
-      if (out.claims.length > 0) {
-        await db.insert(analysisClaims).values(
-          out.claims.map((c) => ({
-            draftId: created.id,
-            kind: c.kind,
-            anchorId: c.anchorId,
-            label: c.label,
-            category: c.category,
-            body: c.body,
-            evidenceRefs: c.evidenceRefs
-          }))
-        );
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "unknown_error";
-      console.error("[analysis_draft.refresh] build failed:", err);
-      await db.update(analysisDrafts).set({ status: "failed", errorMessage: message }).where(eq14(analysisDrafts.id, created.id));
-    }
-  })();
 });
 router7.get("/api/analysis-draft/:id/claims", async (req, res) => {
   const user = req.user;
   const id = Number.parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
-  const [draft] = await db.select().from(analysisDrafts).where(and10(eq14(analysisDrafts.id, id), eq14(analysisDrafts.userId, user.id))).limit(1);
+  const [draft] = await db.select().from(analysisDrafts).where(and12(eq16(analysisDrafts.id, id), eq16(analysisDrafts.userId, user.id))).limit(1);
   if (!draft) return res.status(404).json({ error: "not_found" });
-  const rows = await db.select().from(analysisClaims).where(eq14(analysisClaims.draftId, id));
+  const rows = await db.select().from(analysisClaims).where(eq16(analysisClaims.draftId, id));
   res.json(rows);
 });
 var analysisDraft_default = router7;
@@ -3092,7 +3162,7 @@ var analysisDraft_default = router7;
 // server/routes/analysisConversation.ts
 import { Router as Router8 } from "express";
 import { z as z8 } from "zod";
-import { and as and11, asc as asc3, desc as desc11, eq as eq15 } from "drizzle-orm";
+import { and as and13, asc as asc3, desc as desc12, eq as eq17 } from "drizzle-orm";
 
 // server/modules/analysisDraft/chat.ts
 async function runAnalysisChatTurn(input) {
@@ -3141,9 +3211,9 @@ router8.use(isAuthenticated);
 var MAX_HISTORY_MESSAGES2 = 16;
 router8.get("/api/analysis-conversation", async (req, res) => {
   const user = req.user;
-  const [conv] = await db.select().from(analysisConversations).where(eq15(analysisConversations.userId, user.id)).orderBy(desc11(analysisConversations.startedAt)).limit(1);
+  const [conv] = await db.select().from(analysisConversations).where(eq17(analysisConversations.userId, user.id)).orderBy(desc12(analysisConversations.startedAt)).limit(1);
   if (!conv) return res.json({ conversation: null, messages: [] });
-  const [latestMsg] = await db.select({ createdAt: analysisConversationMessages.createdAt }).from(analysisConversationMessages).where(eq15(analysisConversationMessages.analysisConversationId, conv.id)).orderBy(desc11(analysisConversationMessages.createdAt)).limit(1);
+  const [latestMsg] = await db.select({ createdAt: analysisConversationMessages.createdAt }).from(analysisConversationMessages).where(eq17(analysisConversationMessages.analysisConversationId, conv.id)).orderBy(desc12(analysisConversationMessages.createdAt)).limit(1);
   if (conv.status === "active" && isStale(latestMsg?.createdAt ?? null)) {
     await onStateChange({
       userId: user.id,
@@ -3157,12 +3227,12 @@ router8.get("/api/analysis-conversation", async (req, res) => {
 });
 router8.post("/api/analysis-conversation/start", async (req, res) => {
   const user = req.user;
-  const [draft] = await db.select().from(analysisDrafts).where(and11(eq15(analysisDrafts.userId, user.id), eq15(analysisDrafts.status, "ready"))).orderBy(desc11(analysisDrafts.createdAt)).limit(1);
+  const [draft] = await db.select().from(analysisDrafts).where(and13(eq17(analysisDrafts.userId, user.id), eq17(analysisDrafts.status, "ready"))).orderBy(desc12(analysisDrafts.createdAt)).limit(1);
   if (!draft) return res.status(400).json({ error: "no_ready_draft" });
   const [existing] = await db.select().from(analysisConversations).where(
-    and11(
-      eq15(analysisConversations.userId, user.id),
-      eq15(analysisConversations.draftId, draft.id)
+    and13(
+      eq17(analysisConversations.userId, user.id),
+      eq17(analysisConversations.draftId, draft.id)
     )
   ).limit(1);
   if (existing) {
@@ -3201,13 +3271,13 @@ router8.post("/api/analysis-conversation/message", async (req, res) => {
     return res.status(400).json({ error: "invalid_input", detail: parsed.error.flatten() });
   }
   const [conv] = await db.select().from(analysisConversations).where(
-    and11(
-      eq15(analysisConversations.userId, user.id),
-      eq15(analysisConversations.status, "active")
+    and13(
+      eq17(analysisConversations.userId, user.id),
+      eq17(analysisConversations.status, "active")
     )
-  ).orderBy(desc11(analysisConversations.startedAt)).limit(1);
+  ).orderBy(desc12(analysisConversations.startedAt)).limit(1);
   if (!conv) return res.status(404).json({ error: "no_active_conversation" });
-  const [draft] = await db.select().from(analysisDrafts).where(and11(eq15(analysisDrafts.id, conv.draftId), eq15(analysisDrafts.userId, user.id))).limit(1);
+  const [draft] = await db.select().from(analysisDrafts).where(and13(eq17(analysisDrafts.id, conv.draftId), eq17(analysisDrafts.userId, user.id))).limit(1);
   if (!draft || draft.status !== "ready" && draft.status !== "agreed") {
     return res.status(400).json({ error: "draft_not_available", status: draft?.status });
   }
@@ -3227,7 +3297,7 @@ router8.post("/api/analysis-conversation/message", async (req, res) => {
   const allMessages = await loadMessages2(conv.id);
   const priorHistory = allMessages.filter((m) => m.id !== userMsg.id).map((m) => ({ role: m.role, content: m.content }));
   const history = priorHistory.slice(-MAX_HISTORY_MESSAGES2);
-  const noteRows = await db.select().from(analysisClaims).where(and11(eq15(analysisClaims.draftId, draft.id), eq15(analysisClaims.kind, "note")));
+  const noteRows = await db.select().from(analysisClaims).where(and13(eq17(analysisClaims.draftId, draft.id), eq17(analysisClaims.kind, "note")));
   const notes = noteRows.map((n) => ({
     category: n.category ?? "other",
     label: n.label,
@@ -3288,7 +3358,9 @@ router8.post("/api/analysis-conversation/message", async (req, res) => {
       });
     }
     if (turn.action === "request_regenerate") {
-      await db.update(analysisDrafts).set({ status: "superseded", supersededAt: /* @__PURE__ */ new Date() }).where(eq15(analysisDrafts.id, draft.id));
+      refreshCanvas2Draft(user.id).catch((err) => {
+        console.warn("[analysis_conversation] auto-refresh failed:", err);
+      });
       audit({
         req,
         action: "analysis_draft.regenerate_requested",
@@ -3304,8 +3376,8 @@ router8.post("/api/analysis-conversation/message", async (req, res) => {
         resourceId: String(conv.id)
       });
     }
-    await db.update(analysisConversations).set({ updatedAt: /* @__PURE__ */ new Date() }).where(eq15(analysisConversations.id, conv.id));
-    const [updatedConv] = await db.select().from(analysisConversations).where(eq15(analysisConversations.id, conv.id)).limit(1);
+    await db.update(analysisConversations).set({ updatedAt: /* @__PURE__ */ new Date() }).where(eq17(analysisConversations.id, conv.id));
+    const [updatedConv] = await db.select().from(analysisConversations).where(eq17(analysisConversations.id, conv.id)).limit(1);
     res.json({
       conversation: updatedConv,
       userMessage: userMsg,
@@ -3328,7 +3400,7 @@ router8.post("/api/analysis-conversation/message", async (req, res) => {
   }
 });
 async function loadMessages2(conversationId) {
-  return db.select().from(analysisConversationMessages).where(eq15(analysisConversationMessages.analysisConversationId, conversationId)).orderBy(
+  return db.select().from(analysisConversationMessages).where(eq17(analysisConversationMessages.analysisConversationId, conversationId)).orderBy(
     asc3(analysisConversationMessages.createdAt),
     asc3(analysisConversationMessages.id)
   );
@@ -3338,26 +3410,26 @@ var analysisConversation_default = router8;
 // server/routes/subStep.ts
 import { Router as Router9 } from "express";
 import { z as z9 } from "zod";
-import { and as and13, asc as asc4, desc as desc13, eq as eq17, isNull as isNull5, sql as sql3 } from "drizzle-orm";
+import { and as and15, asc as asc4, desc as desc14, eq as eq19, isNull as isNull6, sql as sql3 } from "drizzle-orm";
 
 // server/modules/subStep/orchestrator.ts
-import { and as and12, desc as desc12, eq as eq16, isNull as isNull4 } from "drizzle-orm";
+import { and as and14, desc as desc13, eq as eq18, isNull as isNull5 } from "drizzle-orm";
 async function getCurrentSubStep(userId) {
   const existing = await currentForUser(userId);
   if (existing) return existing;
   return await lazyBackfill(userId);
 }
 async function currentForUser(userId) {
-  const rows = await db.select().from(subSteps).where(and12(eq16(subSteps.userId, userId), isNull4(subSteps.supersededAt))).orderBy(desc12(subSteps.startedAt)).limit(1);
+  const rows = await db.select().from(subSteps).where(and14(eq18(subSteps.userId, userId), isNull5(subSteps.supersededAt))).orderBy(desc13(subSteps.startedAt)).limit(1);
   return rows[0] ?? null;
 }
 async function lazyBackfill(userId) {
-  const [user] = await db.select().from(users).where(eq16(users.id, userId)).limit(1);
+  const [user] = await db.select().from(users).where(eq18(users.id, userId)).limit(1);
   if (!user) throw new Error(`User not found: ${userId}`);
-  const stmts = await db.select().from(statements).where(eq16(statements.userId, userId));
-  const [latestAnalysis] = await db.select().from(analyses).where(and12(eq16(analyses.userId, userId), eq16(analyses.status, "done"))).orderBy(desc12(analyses.createdAt)).limit(1);
-  const [conv] = await db.select().from(conversations).where(eq16(conversations.userId, userId)).limit(1);
-  const [latestDraft] = await db.select().from(analysisDrafts).where(and12(eq16(analysisDrafts.userId, userId), isNull4(analysisDrafts.supersededAt))).orderBy(desc12(analysisDrafts.createdAt)).limit(1);
+  const stmts = await db.select().from(statements).where(eq18(statements.userId, userId));
+  const [latestAnalysis] = await db.select().from(analyses).where(and14(eq18(analyses.userId, userId), eq18(analyses.status, "done"))).orderBy(desc13(analyses.createdAt)).limit(1);
+  const [conv] = await db.select().from(conversations).where(eq18(conversations.userId, userId)).limit(1);
+  const [latestDraft] = await db.select().from(analysisDrafts).where(and14(eq18(analysisDrafts.userId, userId), isNull5(analysisDrafts.supersededAt))).orderBy(desc13(analysisDrafts.createdAt)).limit(1);
   const derived = deriveCurrentFromLegacy({
     hasStatements: stmts.length > 0,
     hasBuildCompletedAt: !!user.buildCompletedAt,
@@ -3451,11 +3523,11 @@ function deriveCurrentFromLegacy(input) {
   };
 }
 async function advanceSubStep(userId, currentId, options = {}) {
-  const [current] = await db.select().from(subSteps).where(and12(eq16(subSteps.id, currentId), eq16(subSteps.userId, userId))).limit(1);
+  const [current] = await db.select().from(subSteps).where(and14(eq18(subSteps.id, currentId), eq18(subSteps.userId, userId))).limit(1);
   if (!current) throw new Error("sub-step not found");
   const nextBeat = nextBeatAfter(current.beat);
   if (!nextBeat) throw new Error(`no beat after ${current.beat}`);
-  await db.update(subSteps).set({ status: "agreed", agreedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(subSteps.id, current.id));
+  await db.update(subSteps).set({ status: "agreed", agreedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(subSteps.id, current.id));
   const [created] = await db.insert(subSteps).values({
     userId,
     canvasKey: current.canvasKey,
@@ -3469,10 +3541,10 @@ async function advanceSubStep(userId, currentId, options = {}) {
   return created;
 }
 async function agreeSubStep(userId, currentId) {
-  const [current] = await db.select().from(subSteps).where(and12(eq16(subSteps.id, currentId), eq16(subSteps.userId, userId))).limit(1);
+  const [current] = await db.select().from(subSteps).where(and14(eq18(subSteps.id, currentId), eq18(subSteps.userId, userId))).limit(1);
   if (!current) throw new Error("sub-step not found");
   if (current.beat !== "discuss") throw new Error("can only agree a discuss beat");
-  await db.update(subSteps).set({ status: "agreed", agreedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(subSteps.id, current.id));
+  await db.update(subSteps).set({ status: "agreed", agreedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(subSteps.id, current.id));
   const [live] = await db.insert(subSteps).values({
     userId,
     canvasKey: current.canvasKey,
@@ -3486,10 +3558,10 @@ async function agreeSubStep(userId, currentId) {
   return live;
 }
 async function reopenSubStep(userId, currentId) {
-  const [current] = await db.select().from(subSteps).where(and12(eq16(subSteps.id, currentId), eq16(subSteps.userId, userId))).limit(1);
+  const [current] = await db.select().from(subSteps).where(and14(eq18(subSteps.id, currentId), eq18(subSteps.userId, userId))).limit(1);
   if (!current) throw new Error("sub-step not found");
   if (current.beat !== "live") throw new Error("can only reopen a live beat");
-  await db.update(subSteps).set({ status: "superseded", supersededAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(subSteps.id, current.id));
+  await db.update(subSteps).set({ status: "superseded", supersededAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(subSteps.id, current.id));
   const [discuss] = await db.insert(subSteps).values({
     userId,
     canvasKey: current.canvasKey,
@@ -3503,10 +3575,10 @@ async function reopenSubStep(userId, currentId) {
   return discuss;
 }
 async function markAnalyseError(userId, subStepId, errorMessage) {
-  await db.update(subSteps).set({ errorMessage, updatedAt: /* @__PURE__ */ new Date() }).where(and12(eq16(subSteps.id, subStepId), eq16(subSteps.userId, userId)));
+  await db.update(subSteps).set({ errorMessage, updatedAt: /* @__PURE__ */ new Date() }).where(and14(eq18(subSteps.id, subStepId), eq18(subSteps.userId, userId)));
 }
 async function clearAnalyseError(userId, subStepId) {
-  await db.update(subSteps).set({ errorMessage: null, updatedAt: /* @__PURE__ */ new Date() }).where(and12(eq16(subSteps.id, subStepId), eq16(subSteps.userId, userId)));
+  await db.update(subSteps).set({ errorMessage: null, updatedAt: /* @__PURE__ */ new Date() }).where(and14(eq18(subSteps.id, subStepId), eq18(subSteps.userId, userId)));
 }
 function nextBeatAfter(beat) {
   if (beat === "gather") return "analyse";
@@ -3540,7 +3612,7 @@ router9.post("/api/sub-step/:id/advance", async (req, res) => {
   const id = Number.parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
   try {
-    const [prior] = await db.select().from(subSteps).where(and13(eq17(subSteps.id, id), eq17(subSteps.userId, user.id))).limit(1);
+    const [prior] = await db.select().from(subSteps).where(and15(eq19(subSteps.id, id), eq19(subSteps.userId, user.id))).limit(1);
     const next = await advanceSubStep(user.id, id);
     audit({
       req,
@@ -3574,7 +3646,7 @@ router9.get("/api/sub-step/:id/checklist", async (req, res) => {
   const user = req.user;
   const id = Number.parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
-  const [sub] = await db.select().from(subSteps).where(and13(eq17(subSteps.id, id), eq17(subSteps.userId, user.id))).limit(1);
+  const [sub] = await db.select().from(subSteps).where(and15(eq19(subSteps.id, id), eq19(subSteps.userId, user.id))).limit(1);
   if (!sub) return res.status(404).json({ error: "not_found" });
   try {
     const checklist = await deriveChecklist(user.id, sub);
@@ -3599,7 +3671,7 @@ router9.post("/api/sub-step/:id/skip", async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ error: "invalid_input", detail: parsed.error.flatten() });
   }
-  const [sub] = await db.select().from(subSteps).where(and13(eq17(subSteps.id, id), eq17(subSteps.userId, user.id))).limit(1);
+  const [sub] = await db.select().from(subSteps).where(and15(eq19(subSteps.id, id), eq19(subSteps.userId, user.id))).limit(1);
   if (!sub) return res.status(404).json({ error: "not_found" });
   const reason = parsed.data.reason?.trim() || null;
   await writeNote({
@@ -3634,7 +3706,7 @@ router9.post("/api/sub-step/:id/discuss-topic", async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ error: "invalid_input", detail: parsed.error.flatten() });
   }
-  const [sub] = await db.select().from(subSteps).where(and13(eq17(subSteps.id, id), eq17(subSteps.userId, user.id))).limit(1);
+  const [sub] = await db.select().from(subSteps).where(and15(eq19(subSteps.id, id), eq19(subSteps.userId, user.id))).limit(1);
   if (!sub) return res.status(404).json({ error: "not_found" });
   await onStateChange({
     userId: user.id,
@@ -3663,12 +3735,12 @@ router9.post("/api/sub-step/:id/agree", async (req, res) => {
   try {
     const live = await agreeSubStep(user.id, id);
     if (live.canvasKey === "picture") {
-      await db.update(conversations).set({ status: "complete", completedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(and13(eq17(conversations.userId, user.id), eq17(conversations.status, "active")));
+      await db.update(conversations).set({ status: "complete", completedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(and15(eq19(conversations.userId, user.id), eq19(conversations.status, "active")));
     } else if (live.canvasKey === "analysis") {
       const content = live.contentJson ?? {};
       if (content.draftId) {
         await db.update(analysisDrafts).set({ status: "agreed", agreedAt: /* @__PURE__ */ new Date() }).where(
-          and13(eq17(analysisDrafts.id, content.draftId), eq17(analysisDrafts.userId, user.id))
+          and15(eq19(analysisDrafts.id, content.draftId), eq19(analysisDrafts.userId, user.id))
         );
       }
     }
@@ -3710,7 +3782,7 @@ router9.post("/api/sub-step/:id/reopen", async (req, res) => {
   if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
   try {
     const discuss = await reopenSubStep(user.id, id);
-    await db.update(conversations).set({ status: "active", completedAt: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq17(conversations.userId, user.id));
+    await db.update(conversations).set({ status: "active", completedAt: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq19(conversations.userId, user.id));
     audit({
       req,
       action: "sub_step.reopen",
@@ -3737,7 +3809,7 @@ router9.post("/api/sub-step/:id/retry", async (req, res) => {
   if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
   await clearAnalyseError(user.id, id);
   audit({ req, action: "sub_step.retry", resourceType: "sub_step", resourceId: String(id) });
-  const [fresh] = await db.select().from(subSteps).where(eq17(subSteps.id, id)).limit(1);
+  const [fresh] = await db.select().from(subSteps).where(eq19(subSteps.id, id)).limit(1);
   if (fresh) void maybeKickoffAnalyse(user.id, fresh);
   res.json({ ok: true });
 });
@@ -3752,7 +3824,7 @@ router9.post("/api/sub-step/:id/message", async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ error: "invalid_input", detail: parsed.error.flatten() });
   }
-  const [sub] = await db.select().from(subSteps).where(and13(eq17(subSteps.id, id), eq17(subSteps.userId, user.id))).limit(1);
+  const [sub] = await db.select().from(subSteps).where(and15(eq19(subSteps.id, id), eq19(subSteps.userId, user.id))).limit(1);
   if (!sub) return res.status(404).json({ error: "not_found" });
   if (sub.canvasKey !== "picture" || sub.beat !== "discuss") {
     return res.status(400).json({ error: "chat_not_supported_for_beat" });
@@ -3761,12 +3833,12 @@ router9.post("/api/sub-step/:id/message", async (req, res) => {
   res.json({ subStep: sub, userMessage: userMsg });
 });
 async function loadMessages3(subStepId) {
-  return db.select().from(subStepMessages).where(eq17(subStepMessages.subStepId, subStepId)).orderBy(asc4(subStepMessages.createdAt), asc4(subStepMessages.id));
+  return db.select().from(subStepMessages).where(eq19(subStepMessages.subStepId, subStepId)).orderBy(asc4(subStepMessages.createdAt), asc4(subStepMessages.id));
 }
 async function runPictureAnalyse(userId, subStepId) {
-  const [sub] = await db.select().from(subSteps).where(eq17(subSteps.id, subStepId)).limit(1);
+  const [sub] = await db.select().from(subSteps).where(eq19(subSteps.id, subStepId)).limit(1);
   if (!sub || sub.beat !== "analyse" || sub.canvasKey !== "picture") return;
-  const sts = await db.select().from(statements).where(and13(eq17(statements.userId, userId), eq17(statements.status, "extracted")));
+  const sts = await db.select().from(statements).where(and15(eq19(statements.userId, userId), eq19(statements.status, "extracted")));
   if (sts.length === 0) {
     await markAnalyseError(userId, subStepId, "no_statements");
     return;
@@ -3796,12 +3868,12 @@ async function runPictureAnalyse(userId, subStepId) {
       cacheReadTokens: usage.cacheReadTokens,
       cacheCreationTokens: usage.cacheCreationTokens,
       completedAt: /* @__PURE__ */ new Date()
-    }).where(eq17(analyses.id, analysis.id));
+    }).where(eq19(analyses.id, analysis.id));
     await persistCanvas1Claims(analysis.id, result);
     await db.update(subSteps).set({
       contentJson: { analysisId: analysis.id },
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq17(subSteps.id, subStepId));
+    }).where(eq19(subSteps.id, subStepId));
     onStateChange({
       userId,
       trigger: "analyse_completed",
@@ -3816,7 +3888,7 @@ async function runPictureAnalyse(userId, subStepId) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown_error";
     console.error("[runPictureAnalyse] failed:", err);
-    await db.update(analyses).set({ status: "failed", errorMessage: message, completedAt: /* @__PURE__ */ new Date() }).where(eq17(analyses.id, analysis.id));
+    await db.update(analyses).set({ status: "failed", errorMessage: message, completedAt: /* @__PURE__ */ new Date() }).where(eq19(analyses.id, analysis.id));
     await markAnalyseError(userId, subStepId, message);
   }
 }
@@ -3871,10 +3943,10 @@ async function releaseAnalyseClaim(subStepId) {
 }
 async function startCanvas2ForUser(userId) {
   const [existing] = await db.select().from(subSteps).where(
-    and13(
-      eq17(subSteps.userId, userId),
-      eq17(subSteps.canvasKey, "analysis"),
-      isNull5(subSteps.supersededAt)
+    and15(
+      eq19(subSteps.userId, userId),
+      eq19(subSteps.canvasKey, "analysis"),
+      isNull6(subSteps.supersededAt)
     )
   ).limit(1);
   if (existing) return;
@@ -3893,7 +3965,7 @@ async function startCanvas2ForUser(userId) {
   );
 }
 async function runAnalysisAnalyse(userId, subStepId) {
-  const [sub] = await db.select().from(subSteps).where(eq17(subSteps.id, subStepId)).limit(1);
+  const [sub] = await db.select().from(subSteps).where(eq19(subSteps.id, subStepId)).limit(1);
   if (!sub || sub.canvasKey !== "analysis" || sub.beat !== "analyse") return;
   const [factsPrompt, prosePrompt, panelsPrompt] = await Promise.all([
     getActivePrompt("analysis_facts"),
@@ -3904,17 +3976,17 @@ async function runAnalysisAnalyse(userId, subStepId) {
     await markAnalyseError(userId, subStepId, "no_active_analysis_prompts");
     return;
   }
-  const [c1Conversation] = await db.select().from(conversations).where(and13(eq17(conversations.userId, userId), eq17(conversations.status, "complete"))).orderBy(desc13(conversations.completedAt)).limit(1);
+  const [c1Conversation] = await db.select().from(conversations).where(and15(eq19(conversations.userId, userId), eq19(conversations.status, "complete"))).orderBy(desc14(conversations.completedAt)).limit(1);
   if (!c1Conversation) {
     await markAnalyseError(userId, subStepId, "canvas_1_not_agreed");
     return;
   }
-  const [c1Analysis] = await db.select().from(analyses).where(and13(eq17(analyses.userId, userId), eq17(analyses.status, "done"))).orderBy(desc13(analyses.createdAt)).limit(1);
+  const [c1Analysis] = await db.select().from(analyses).where(and15(eq19(analyses.userId, userId), eq19(analyses.status, "done"))).orderBy(desc14(analyses.createdAt)).limit(1);
   if (!c1Analysis) {
     await markAnalyseError(userId, subStepId, "no_canvas_1_analysis");
     return;
   }
-  const userStatements = await db.select().from(statements).where(eq17(statements.userId, userId));
+  const userStatements = await db.select().from(statements).where(eq19(statements.userId, userId));
   const [draft] = await db.insert(analysisDrafts).values({
     userId,
     sourceConversationId: c1Conversation.id,
@@ -3931,7 +4003,7 @@ async function runAnalysisAnalyse(userId, subStepId) {
       firstTakeAnalysis: c1Analysis.result,
       conversationProfile: c1Conversation.profile,
       flaggedIssues: c1Conversation.flaggedIssues ?? [],
-      statementSummaries: summariseStatements3(userStatements)
+      statementSummaries: summariseStatements4(userStatements)
     });
     await db.update(analysisDrafts).set({
       status: "ready",
@@ -3944,7 +4016,7 @@ async function runAnalysisAnalyse(userId, subStepId) {
       cacheCreationTokens: out.usage.cacheCreationTokens,
       promptVersionIds: out.promptVersionIds,
       generatedAt: /* @__PURE__ */ new Date()
-    }).where(eq17(analysisDrafts.id, draft.id));
+    }).where(eq19(analysisDrafts.id, draft.id));
     if (out.claims.length > 0) {
       await db.insert(analysisClaims).values(
         out.claims.map((c) => ({
@@ -3976,7 +4048,7 @@ async function runAnalysisAnalyse(userId, subStepId) {
     await db.update(subSteps).set({
       contentJson: { draftId: draft.id, analysisId: c1Analysis.id },
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq17(subSteps.id, subStepId));
+    }).where(eq19(subSteps.id, subStepId));
     onStateChange({
       userId,
       trigger: "analyse_completed",
@@ -3996,11 +4068,11 @@ async function runAnalysisAnalyse(userId, subStepId) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown_error";
     console.error("[runAnalysisAnalyse] failed:", err);
-    await db.update(analysisDrafts).set({ status: "failed", errorMessage: message }).where(eq17(analysisDrafts.id, draft.id));
+    await db.update(analysisDrafts).set({ status: "failed", errorMessage: message }).where(eq19(analysisDrafts.id, draft.id));
     await markAnalyseError(userId, subStepId, message);
   }
 }
-function summariseStatements3(rows) {
+function summariseStatements4(rows) {
   return rows.map((s) => {
     const r = s.extractionResult ?? null;
     return {

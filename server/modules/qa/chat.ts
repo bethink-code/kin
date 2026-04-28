@@ -13,6 +13,17 @@ export type StatementSummary = {
   transactionCount: number | null;
 };
 
+// Raw extracted statement detail — passed in alongside StatementSummary so
+// Ally can answer specific transaction questions ("list December deposits
+// from The Herbal Horse"). Lives in the stable cache block so we pay the
+// token cost once per session, not per turn.
+export type StatementDetail = {
+  filename: string;
+  // Pass the extraction result through verbatim — the analysis prompt
+  // already knows how to read its shape.
+  extraction: unknown;
+};
+
 export type QaPhase = "bring_it_in" | "analysing" | "first_take_gaps";
 
 type TurnInput = {
@@ -26,6 +37,10 @@ type TurnInput = {
   analysis: unknown | null;
   // What's been uploaded so far. Always send — Ally uses this in every phase.
   statements: StatementSummary[];
+  // Optional full transaction detail for the user's extracted statements.
+  // Cached in the stable block. When present, Ally can list specific
+  // transactions on request and enumerate evidence on data disputes.
+  statementDetails?: StatementDetail[];
   profile: QaProfile;
   flaggedIssues: string[];
   history: Array<{ role: "user" | "assistant"; content: string }>;
@@ -129,6 +144,20 @@ function buildStableContext(input: TurnInput): string {
   }
 
   sections.push("", "## Statements so far", statementsBlock, "");
+
+  // Full transaction detail when available. Cached so we pay tokens once per
+  // session. Ally needs this to answer "list December transactions from
+  // X" and to enumerate evidence when the user contests a number.
+  if (input.statementDetails && input.statementDetails.length > 0) {
+    sections.push(
+      "## Full statement detail (every transaction)",
+      "Use this to enumerate evidence when the user asks about specific transactions, dates, deposits, or contests a number. Quote actual amounts and dates rather than summarising.",
+      "",
+    );
+    for (const d of input.statementDetails) {
+      sections.push(`### ${d.filename}`, "```json", JSON.stringify(d.extraction), "```", "");
+    }
+  }
 
   if (input.analysis) {
     // Compact (no pretty-print). Saves ~30% of analysis tokens vs indent=2.

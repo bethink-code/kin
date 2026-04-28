@@ -87,6 +87,19 @@ export const qaTurnResultSchema = z.object({
     .describe(
       "continuing = more to gather; minimum_viable = enough for a picture but could gather more; complete = nothing essential left to gather."
     ),
+
+  triggerRefresh: z
+    .boolean()
+    .default(false)
+    .describe(
+      "Set true when the user has just made a substantive correction to a fact that the rendered analysis depends on (e.g. 'that's not salary, it's self-funding from my business'; 'my real income is R30k, not R10k'; 'please update the picture based on what I just told you'). When true, the server kicks off a fresh analysis with the updated profile in context, and the rendered story re-renders. Set FALSE for soft acknowledgements, clarifying questions, and small chat updates that don't change the analysis."
+    ),
+  regenerateReason: z
+    .string()
+    .optional()
+    .describe(
+      "When triggerRefresh=true, a one-sentence summary of what the user corrected — the next analysis pass uses this as a hint. e.g. 'User corrected income: actual salary is R30k/month from The Herbal Horse, fragmented across multiple deposits.'"
+    ),
 });
 
 export type QaTurnResult = z.infer<typeof qaTurnResultSchema>;

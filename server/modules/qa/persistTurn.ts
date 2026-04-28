@@ -7,10 +7,11 @@ import {
   type ConversationMessage,
   type SystemPrompt,
 } from "@shared/schema";
-import { runQaTurn, type StatementSummary, type QaPhase } from "./chat";
+import { runQaTurn, type StatementSummary, type StatementDetail, type QaPhase } from "./chat";
 import { mergeFlaggedIssues, mergeProfile } from "./mergeProfile";
 import type { QaProfile } from "./schema";
 import { onStateChange } from "../stateChange";
+import { refreshCanvas1Analysis } from "../analysis/refresh";
 
 type RunAndPersistInput = {
   conversationId: number;
@@ -20,6 +21,7 @@ type RunAndPersistInput = {
   phase: QaPhase;
   analysis: unknown | null;
   statements: StatementSummary[];
+  statementDetails?: StatementDetail[];
   profile: QaProfile;
   flaggedIssues: string[];
   history: Array<{ role: "user" | "assistant"; content: string }>;
@@ -46,6 +48,7 @@ export async function runAndPersistTurn(input: RunAndPersistInput): Promise<RunA
     phase: input.phase,
     analysis: input.analysis,
     statements: input.statements,
+    statementDetails: input.statementDetails,
     profile: input.profile,
     flaggedIssues: input.flaggedIssues,
     history: input.history,
@@ -110,6 +113,17 @@ export async function runAndPersistTurn(input: RunAndPersistInput): Promise<RunA
         sourceSubStepId: null,
       },
     }).catch(() => {});
+  }
+
+  // Auto-refresh hook: when Ally judges that the user has just made a
+  // substantive correction the rendered analysis depends on, kick off a fresh
+  // Canvas 1 analyse pass with the merged profile + flags as context. Fire-
+  // and-forget — the new analysis lands on /api/analysis/latest when ready
+  // and the client picks it up via its existing polling.
+  if (result.triggerRefresh) {
+    refreshCanvas1Analysis(input.userId).catch((err) => {
+      console.warn("[runAndPersistTurn] auto-refresh failed:", err);
+    });
   }
 
   return { conversation, assistantMessage };
