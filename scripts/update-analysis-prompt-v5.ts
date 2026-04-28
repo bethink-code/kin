@@ -1,6 +1,6 @@
 // v5 of analysis prompt — adds annotation + explainClaim guidance so the
 // first-take story has clickable phrases for inline "explain me this"
-// (matches Canvas 2 functionality).
+// (matches Phase 2 functionality).
 //
 // Run: doppler run -- npx tsx scripts/update-analysis-prompt-v5.ts
 

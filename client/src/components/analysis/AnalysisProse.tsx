@@ -39,7 +39,7 @@ export function AnalysisProse({
 
   return (
     // Full-width article (no max-w cap) + matching vertical rhythm to
-    // StoryArticle. Canvas 1's reference visual: serif heading, 3xl;
+    // StoryArticle. Phase 1's reference visual: serif heading, 3xl;
     // opening paragraph at text-lg/leading-relaxed; sections at space-y-12;
     // section heads at serif text-2xl mb-4; body at text-foreground/90.
     <article className="space-y-12">

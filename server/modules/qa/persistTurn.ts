@@ -117,7 +117,7 @@ export async function runAndPersistTurn(input: RunAndPersistInput): Promise<RunA
 
   // Auto-refresh hook: when Ally judges that the user has just made a
   // substantive correction the rendered analysis depends on, kick off a fresh
-  // Canvas 1 analyse pass with the merged profile + flags as context. Fire-
+  // Phase 1 analyse pass with the merged profile + flags as context. Fire-
   // and-forget — the new analysis lands on /api/analysis/latest when ready
   // and the client picks it up via its existing polling.
   if (result.triggerRefresh) {

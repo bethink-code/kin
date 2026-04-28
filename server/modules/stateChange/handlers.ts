@@ -15,21 +15,21 @@ import { OPENERS, REOPENERS, TOPIC_STARTERS, postAllyMessage } from "./messages"
 import type { StateChangeContext } from "./index";
 
 // ---------------------------------------------------------------------------
-// chat_turn_taken — the polarity flip. The chat pipelines (qa for Canvas 1,
-// analysisDraft/chat for Canvas 2) used to write only to the legacy stores
+// chat_turn_taken — the polarity flip. The chat pipelines (qa for Phase 1,
+// analysisDraft/chat for Phase 2) used to write only to the legacy stores
 // (conversations.profile / analysisClaims). Going forward they also dispatch
 // here so each turn's new facts land canonically in record_notes.
 //
 // Two payload shapes supported (one per canvas):
 //
-//   Canvas 1 (qa):
+//   Phase 1 (qa):
 //     { canvas: "picture",
 //       deltas: { profileFieldKey: { before, after, kind: "fact" | "preference" }... },
 //       newFlaggedIssues: string[],
 //       sourceMessageId: number,
 //       sourceSubStepId: number | null }
 //
-//   Canvas 2 (analysisDraft chat):
+//   Phase 2 (analysisDraft chat):
 //     { canvas: "analysis",
 //       noteUpdates: [{ category, label, body, evidenceRefs }...],
 //       sourceMessageId: number,
@@ -92,7 +92,7 @@ export async function writeNotesFromTurn(ctx: StateChangeContext): Promise<void>
         label,
         body,
         sourceKind: "ally_generated",
-        sourceCanvas: "picture",
+        sourcePhase: "picture",
         sourceSubStepId: p.sourceSubStepId ?? ctx.subStepId ?? null,
         sourceMessageId: p.sourceMessageId ?? null,
         attributes: {
@@ -109,7 +109,7 @@ export async function writeNotesFromTurn(ctx: StateChangeContext): Promise<void>
         label: flag.length > 80 ? flag.slice(0, 77) + "..." : flag,
         body: flag,
         sourceKind: "ally_generated",
-        sourceCanvas: "picture",
+        sourcePhase: "picture",
         sourceSubStepId: p.sourceSubStepId ?? ctx.subStepId ?? null,
         sourceMessageId: p.sourceMessageId ?? null,
         attributes: {
@@ -131,7 +131,7 @@ export async function writeNotesFromTurn(ctx: StateChangeContext): Promise<void>
         body: n.body,
         evidenceRefs: n.evidenceRefs,
         sourceKind: "ally_generated",
-        sourceCanvas: "analysis",
+        sourcePhase: "analysis",
         sourceSubStepId: p.sourceSubStepId ?? ctx.subStepId ?? null,
         sourceMessageId: p.sourceMessageId ?? null,
         attributes: {
@@ -143,7 +143,7 @@ export async function writeNotesFromTurn(ctx: StateChangeContext): Promise<void>
 }
 
 // ---------------------------------------------------------------------------
-// analyse_completed — Ally finished an Analyse beat. Write a "synthesis"
+// analyse_completed — Ally finished an Analyse step. Write a "synthesis"
 // observation summarising what was produced, and trigger meta-synthesis so
 // the brain rolls up the new chunk.
 //
@@ -179,7 +179,7 @@ export async function writeAnalyseSynthesisNote(ctx: StateChangeContext): Promis
     label,
     body,
     sourceKind: "ally_generated",
-    sourceCanvas: canvas,
+    sourcePhase: canvas,
     sourceSubStepId: ctx.subStepId ?? null,
     attributes: {
       analysisId: p.analysisId ?? null,
@@ -189,7 +189,7 @@ export async function writeAnalyseSynthesisNote(ctx: StateChangeContext): Promis
 }
 
 // ---------------------------------------------------------------------------
-// discuss_agreed — the ceremonial close of a Discuss beat. Write a decision
+// discuss_agreed — the ceremonial close of a Discuss step. Write a decision
 // note marking the agreement and queue meta-synthesis so the brain catches
 // up with the newly-stable state.
 // ---------------------------------------------------------------------------
@@ -215,7 +215,7 @@ export async function writeAgreementDecision(ctx: StateChangeContext): Promise<v
     label,
     body: p.summary ?? null,
     sourceKind: "user_stated",
-    sourceCanvas: canvas,
+    sourcePhase: canvas,
     sourceSubStepId: ctx.subStepId ?? null,
     attributes: {
       analysisId: p.analysisId ?? null,
@@ -255,7 +255,7 @@ export async function writeReopenDecision(ctx: StateChangeContext): Promise<void
     label,
     body: p.reason ?? null,
     sourceKind: "user_stated",
-    sourceCanvas: canvas,
+    sourcePhase: canvas,
     sourceSubStepId: ctx.subStepId ?? null,
   });
 }
@@ -284,14 +284,14 @@ export async function writeAdvanceMarker(ctx: StateChangeContext): Promise<void>
         ? `Closed Gather with ${p.statementCount} statement${p.statementCount === 1 ? "" : "s"}.`
         : null,
     sourceKind: "user_stated",
-    sourceCanvas: "picture",
+    sourcePhase: "picture",
     sourceSubStepId: ctx.subStepId ?? null,
   });
 }
 
 // ---------------------------------------------------------------------------
 // Bookend openers — post a transition Ally turn into the canvas's chat when
-// the user crosses into a new beat. Closers wait for the agreement-gate /
+// the user crosses into a new step. Closers wait for the agreement-gate /
 // checklist module (closer = checklist confirmation, not generic wrap-up).
 //
 // Today's coverage:
@@ -362,9 +362,9 @@ export async function postSessionReopener(ctx: StateChangeContext): Promise<void
   const canvas = (ctx.canvas ?? "picture") as "picture" | "analysis";
   // Only Discuss has an active two-way chat worth re-opening. Live is
   // semi-idle; Gather/Analyse have no chat surface.
-  const beat = ((ctx.payload as { beat?: string } | undefined)?.beat ?? "discuss");
-  if (beat !== "discuss") return;
-  const content = REOPENERS[`${canvas}_${beat}`];
+  const step = ((ctx.payload as { step?: string } | undefined)?.step ?? "discuss");
+  if (step !== "discuss") return;
+  const content = REOPENERS[`${canvas}_${step}`];
   if (!content) return;
   await postAllyMessage({ userId: ctx.userId, canvas, content });
 }

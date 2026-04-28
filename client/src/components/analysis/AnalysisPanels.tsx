@@ -44,23 +44,23 @@ export function AnalysisPanels({
     <div className="max-w-2xl space-y-6">
       <ComicPlaceholderNotice />
       <div className="space-y-8">
-        {beats.map((beat) => (
-          <Beat key={beat.id} beat={beat} />
+        {beats.map((step) => (
+          <Step key={step.id} step={step} />
         ))}
       </div>
     </div>
   );
 }
 
-function Beat({ beat }: { beat: PanelBeat }) {
+function Step({ step }: { step: PanelBeat }) {
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
-      <MetaphorPlaceholder metaphor={beat.metaphor} proportion={beat.proportion} />
+      <MetaphorPlaceholder metaphor={step.metaphor} proportion={step.proportion} />
       <div className="px-5 py-4">
         <p className="font-serif text-xl leading-snug">
           <AnnotatedText
-            text={beat.anchorCopy}
-            annotations={beat.annotations ?? []}
+            text={step.anchorCopy}
+            annotations={step.annotations ?? []}
           />
         </p>
       </div>

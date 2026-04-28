@@ -6,12 +6,12 @@ import { PhaseActionBar, type PhaseStep } from "@/components/PhaseActionBar";
 import { StoryArticle, type StoryAnalysisResult } from "@/components/StoryArticle";
 import { useAuth } from "@/hooks/useAuth";
 import { formatDateLong } from "@/lib/formatters";
-import { BEAT_LABEL, BEAT_STATUS_LINE } from "@/lib/canvasCopy";
+import { STEP_LABEL, STEP_STATUS_LINE } from "@/lib/canvasCopy";
 import type { Analysis, SubStep } from "@shared/schema";
 
-// Canvas 1, Live beat. The agreed picture, dated and read-only. Re-entry goes
+// Phase 1, Live step. The agreed picture, dated and read-only. Re-entry goes
 // back to Discuss via the Reopen action. The primary forward CTA jumps to the
-// next canvas (analysis) — Canvas 2 is auto-started on agree, so it always
+// next canvas (analysis) — Phase 2 is auto-started on agree, so it always
 // exists by the time this screen renders.
 export function PictureLive({
   subStep,
@@ -47,12 +47,12 @@ export function PictureLive({
       : null;
 
   const steps: PhaseStep[] = [
-    { key: "gather", label: BEAT_LABEL.picture.gather.title, status: "past", caption: "done" },
-    { key: "analyse", label: BEAT_LABEL.picture.analyse.title, status: "past", caption: "done" },
-    { key: "discuss", label: BEAT_LABEL.picture.discuss.title, status: "past", caption: "done" },
+    { key: "gather", label: STEP_LABEL.picture.gather.title, status: "past", caption: "done" },
+    { key: "draft", label: STEP_LABEL.picture.draft.title, status: "past", caption: "done" },
+    { key: "discuss", label: STEP_LABEL.picture.discuss.title, status: "past", caption: "done" },
     {
       key: "live",
-      label: BEAT_LABEL.picture.live.title,
+      label: STEP_LABEL.picture.live.title,
       status: "current",
       caption: agreedAt ? `agreed ${agreedAt}` : "agreed",
     },
@@ -68,7 +68,7 @@ export function PictureLive({
           />
         }
         name={displayName}
-        statusLine={<span className="text-muted-foreground">{BEAT_STATUS_LINE.picture.live}</span>}
+        statusLine={<span className="text-muted-foreground">{STEP_STATUS_LINE.picture.live}</span>}
       />
       <div className="flex-1 min-h-0 overflow-y-auto shadow-[inset_0_0_0_4px_var(--color-muted)]">
         {storyResult ? (

@@ -4,7 +4,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { invalidateConversation, invalidateAnalysisConversation } from "@/lib/invalidation";
 import { useAuth } from "@/hooks/useAuth";
 import { LOADER_COPY, type Phase } from "@/lib/uiCopy";
-import type { CanvasKey } from "@/lib/canvasCopy";
+import type { PhaseKey } from "@/lib/canvasCopy";
 import { Button } from "@/components/ui/button";
 import { MessageList } from "@/components/conversation/MessageList";
 import { ConversationInput } from "@/components/conversation/ConversationInput";
@@ -18,7 +18,7 @@ type ConversationResponse = {
 // Endpoint pack per canvas. Chat UI is canvas-shape-agnostic — each canvas supplies
 // its own conversation endpoints. Add a new entry here for a future canvas (plan,
 // progress) without touching the chat rendering logic.
-const SOURCES: Record<CanvasKey, {
+const SOURCES: Record<PhaseKey, {
   queryKey: string;
   startPath: string;
   messagePath: string;
@@ -54,14 +54,14 @@ const SOURCES: Record<CanvasKey, {
 
 // Chat body for Ally's pane. No drawer, no modal — just the message stream + input.
 // Auto-starts the conversation the first time it mounts with no existing conversation,
-// unless `canStart` is false (e.g. Canvas 2 while the draft is still thinking —
+// unless `canStart` is false (e.g. Phase 2 while the draft is still thinking —
 // the server would reject /start until the draft is ready).
-// Canvas-aware: the endpoints switch based on which canvas the user is currently on.
+// Phase-aware: the endpoints switch based on which canvas the user is currently on.
 export function AllyChat({
   canvas = "picture",
   canStart = true,
 }: {
-  canvas?: CanvasKey;
+  canvas?: PhaseKey;
   canStart?: boolean;
 }) {
   const { user } = useAuth();

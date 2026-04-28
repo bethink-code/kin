@@ -32,7 +32,7 @@ function summariseStatements(rows: Statement[]) {
 }
 
 /**
- * Kick off a fresh Canvas 2 (analysis-draft) build for `userId`. Inserts an
+ * Kick off a fresh Phase 2 (analysis-draft) build for `userId`. Inserts an
  * in-progress `analysis_drafts` row, supersedes the prior current draft,
  * returns immediately, and runs the 3-call pipeline in the background.
  *

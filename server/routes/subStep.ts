@@ -52,7 +52,7 @@ router.get("/api/sub-step/current", async (req, res) => {
 });
 
 // POST /api/sub-step/:id/advance — person closes Gather ("That's all my docs")
-// or Analyse auto-closes on completion. Creates next beat instance.
+// or Analyse auto-closes on completion. Creates next step instance.
 router.post("/api/sub-step/:id/advance", async (req, res) => {
   const user = req.user as { id: string };
   const id = Number.parseInt(req.params.id, 10);
@@ -71,21 +71,21 @@ router.post("/api/sub-step/:id/advance", async (req, res) => {
       action: "sub_step.advance",
       resourceType: "sub_step",
       resourceId: String(next.id),
-      detail: { from: id, toBeat: next.beat },
+      detail: { from: id, toBeat: next.step },
     });
 
     // State-change dispatch: only the user-driven Gather→Analyse advance is a
     // meaningful "decision" event; the worker-driven Analyse→Discuss is logged
     // separately as analyse_completed.
-    if (prior?.beat === "gather") {
+    if (prior?.step === "gather") {
       const content = (prior.contentJson ?? {}) as { statementIds?: number[] };
       onStateChange({
         userId: user.id,
         trigger: "gather_advanced",
         subStepId: prior.id,
-        canvas: prior.canvasKey as "picture" | "analysis",
+        canvas: prior.phaseKey as "picture" | "analysis",
         payload: {
-          canvas: prior.canvasKey,
+          canvas: prior.phaseKey,
           statementCount: Array.isArray(content.statementIds) ? content.statementIds.length : null,
         },
       }).catch(() => {});
@@ -99,8 +99,8 @@ router.post("/api/sub-step/:id/advance", async (req, res) => {
   }
 });
 
-// GET /api/sub-step/:id/checklist — agreement-gate items for this beat.
-// Returns { canvas, beat, items: [...], agreementReady }.
+// GET /api/sub-step/:id/checklist — agreement-gate items for this step.
+// Returns { canvas, step, items: [...], agreementReady }.
 router.get("/api/sub-step/:id/checklist", async (req, res) => {
   const user = req.user as { id: string };
   const id = Number.parseInt(req.params.id, 10);
@@ -153,7 +153,7 @@ router.post("/api/sub-step/:id/skip", async (req, res) => {
     label: `Skipped: ${parsed.data.itemLabel}`,
     body: reason,
     sourceKind: "user_stated",
-    sourceCanvas: sub.canvasKey,
+    sourcePhase: sub.phaseKey,
     sourceSubStepId: sub.id,
     attributes: { skippedWithoutReason: reason === null } as unknown as object,
   });
@@ -194,9 +194,9 @@ router.post("/api/sub-step/:id/discuss-topic", async (req, res) => {
     userId: user.id,
     trigger: "topic_initiated",
     subStepId: sub.id,
-    canvas: sub.canvasKey as "picture" | "analysis",
+    canvas: sub.phaseKey as "picture" | "analysis",
     payload: {
-      canvas: sub.canvasKey,
+      canvas: sub.phaseKey,
       itemKey: parsed.data.itemKey,
       itemLabel: parsed.data.itemLabel,
     },
@@ -220,12 +220,12 @@ router.post("/api/sub-step/:id/agree", async (req, res) => {
   try {
     const live = await agreeSubStep(user.id, id);
     // Legacy side-effects for continuity with old code paths.
-    if (live.canvasKey === "picture") {
+    if (live.phaseKey === "picture") {
       await db
         .update(conversations)
         .set({ status: "complete", completedAt: new Date(), updatedAt: new Date() })
         .where(and(eq(conversations.userId, user.id), eq(conversations.status, "active")));
-    } else if (live.canvasKey === "analysis") {
+    } else if (live.phaseKey === "analysis") {
       // Mirror agreement on the legacy analysis_drafts row so downstream
       // Explain/Notes surfaces still work against it.
       const content = (live.contentJson ?? {}) as { draftId?: number };
@@ -253,17 +253,17 @@ router.post("/api/sub-step/:id/agree", async (req, res) => {
         userId: user.id,
         trigger: "discuss_agreed",
         subStepId: id,
-        canvas: live.canvasKey as "picture" | "analysis",
+        canvas: live.phaseKey as "picture" | "analysis",
         payload: {
-          canvas: live.canvasKey,
+          canvas: live.phaseKey,
           analysisId: content.analysisId ?? null,
           draftId: content.draftId ?? null,
         },
       }).catch(() => {});
     }
 
-    // Canvas 1 Live → kick off Canvas 2 gather→analyse automatically.
-    if (live.canvasKey === "picture") {
+    // Phase 1 Live → kick off Phase 2 gather→analyse automatically.
+    if (live.phaseKey === "picture") {
       await startCanvas2ForUser(user.id).catch((err) => {
         console.error("[sub_step.agree] startCanvas2 failed:", err);
       });
@@ -300,8 +300,8 @@ router.post("/api/sub-step/:id/reopen", async (req, res) => {
       userId: user.id,
       trigger: "live_reopened",
       subStepId: id,
-      canvas: discuss.canvasKey as "picture" | "analysis",
-      payload: { canvas: discuss.canvasKey },
+      canvas: discuss.phaseKey as "picture" | "analysis",
+      payload: { canvas: discuss.phaseKey },
     }).catch(() => {});
 
     res.json(discuss);
@@ -311,7 +311,7 @@ router.post("/api/sub-step/:id/reopen", async (req, res) => {
   }
 });
 
-// POST /api/sub-step/:id/retry — clears error on the Analyse beat, retries work
+// POST /api/sub-step/:id/retry — clears error on the Analyse step, retries work
 router.post("/api/sub-step/:id/retry", async (req, res) => {
   const user = req.user as { id: string };
   const id = Number.parseInt(req.params.id, 10);
@@ -347,8 +347,8 @@ router.post("/api/sub-step/:id/message", async (req, res) => {
     .limit(1);
   if (!sub) return res.status(404).json({ error: "not_found" });
 
-  // Slice 1: only Canvas 1 Discuss is wired to the legacy qa chat path.
-  if (sub.canvasKey !== "picture" || sub.beat !== "discuss") {
+  // Slice 1: only Phase 1 Discuss is wired to the legacy qa chat path.
+  if (sub.phaseKey !== "picture" || sub.step !== "discuss") {
     return res.status(400).json({ error: "chat_not_supported_for_beat" });
   }
 
@@ -376,7 +376,7 @@ async function loadMessages(subStepId: number) {
 }
 
 // ---------------------------------------------------------------------------
-// Background worker: Canvas 1 Analyse beat. Calls the legacy analyseStatements
+// Background worker: Phase 1 Analyse step. Calls the legacy analyseStatements
 // pipeline, stores the result on both `analyses` (legacy) and writes the
 // analysis id back onto the sub-step's contentJson. On completion, advances to
 // Discuss automatically.
@@ -384,7 +384,7 @@ async function loadMessages(subStepId: number) {
 
 async function runPictureAnalyse(userId: string, subStepId: number): Promise<void> {
   const [sub] = await db.select().from(subSteps).where(eq(subSteps.id, subStepId)).limit(1);
-  if (!sub || sub.beat !== "analyse" || sub.canvasKey !== "picture") return;
+  if (!sub || sub.step !== "draft" || sub.phaseKey !== "picture") return;
 
   const sts = await db
     .select()
@@ -469,15 +469,15 @@ async function runPictureAnalyse(userId: string, subStepId: number): Promise<voi
 }
 
 // ---------------------------------------------------------------------------
-// Canvas dispatch — fire the right Ally-at-work worker based on canvas × beat.
+// Phase dispatch — fire the right Ally-at-work worker based on canvas × step.
 // Idempotent: if the Analyse sub-step already has content indicating in-flight
 // or finished work, do nothing.
 // ---------------------------------------------------------------------------
 
 async function maybeKickoffAnalyse(userId: string, sub: SubStep): Promise<void> {
-  if (sub.beat !== "analyse" || sub.status !== "in_progress" || sub.errorMessage) return;
+  if (sub.step !== "draft" || sub.status !== "in_progress" || sub.errorMessage) return;
   const content = (sub.contentJson ?? {}) as { analysisId?: number; draftId?: number };
-  if (sub.canvasKey === "picture") {
+  if (sub.phaseKey === "picture") {
     if (content.analysisId) return; // work already done
     // Atomic CAS claim: only one concurrent caller wins. Multiple parallel
     // GETs to /api/sub-step/current used to all fire runPictureAnalyse before
@@ -490,7 +490,7 @@ async function maybeKickoffAnalyse(userId: string, sub: SubStep): Promise<void> 
     });
     return;
   }
-  if (sub.canvasKey === "analysis") {
+  if (sub.phaseKey === "analysis") {
     if (content.draftId) return; // work already done
     const claimed = await tryClaimAnalyse(sub.id);
     if (!claimed) return;
@@ -531,17 +531,17 @@ async function releaseAnalyseClaim(subStepId: number): Promise<void> {
   `);
 }
 
-// Canvas 1 just reached Live; create the invisible Canvas 2 Gather and
+// Phase 1 just reached Live; create the invisible Phase 2 Gather and
 // immediately advance into Analyse, kicking off the draft builder.
 async function startCanvas2ForUser(userId: string): Promise<void> {
-  // Idempotent: if the user already has a non-superseded Canvas 2 sub-step, skip.
+  // Idempotent: if the user already has a non-superseded Phase 2 sub-step, skip.
   const [existing] = await db
     .select()
     .from(subSteps)
     .where(
       and(
         eq(subSteps.userId, userId),
-        eq(subSteps.canvasKey, "analysis"),
+        eq(subSteps.phaseKey, "analysis"),
         isNull(subSteps.supersededAt),
       ),
     )
@@ -552,8 +552,8 @@ async function startCanvas2ForUser(userId: string): Promise<void> {
     .insert(subSteps)
     .values({
       userId,
-      canvasKey: "analysis",
-      beat: "gather",
+      phaseKey: "analysis",
+      step: "gather",
       instance: 1,
       status: "in_progress",
       driver: "ally",
@@ -570,14 +570,14 @@ async function startCanvas2ForUser(userId: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Background worker: Canvas 2 Analyse beat. Calls buildAnalysisDraft (the
+// Background worker: Phase 2 Analyse step. Calls buildAnalysisDraft (the
 // facts → prose + panels pipeline) and persists to the legacy analysis_drafts
 // table. The sub-step's contentJson gets { draftId, analysisId } once done.
 // ---------------------------------------------------------------------------
 
 async function runAnalysisAnalyse(userId: string, subStepId: number): Promise<void> {
   const [sub] = await db.select().from(subSteps).where(eq(subSteps.id, subStepId)).limit(1);
-  if (!sub || sub.canvasKey !== "analysis" || sub.beat !== "analyse") return;
+  if (!sub || sub.phaseKey !== "analysis" || sub.step !== "draft") return;
 
   const [factsPrompt, prosePrompt, panelsPrompt] = await Promise.all([
     getActivePrompt("analysis_facts"),
@@ -589,7 +589,7 @@ async function runAnalysisAnalyse(userId: string, subStepId: number): Promise<vo
     return;
   }
 
-  // Canvas 1 inputs: latest agreed conversation + analysis + statements.
+  // Phase 1 inputs: latest agreed conversation + analysis + statements.
   const [c1Conversation] = await db
     .select()
     .from(conversations)
@@ -741,10 +741,10 @@ function summariseStatements(rows: Statement[]) {
   });
 }
 
-// Insert Canvas 1 explain claims tied to an analyses row. The Canvas 1
+// Insert Phase 1 explain claims tied to an analyses row. The Phase 1
 // `analysis` schema (v5) emits annotations per prose field + a top-level
 // explainClaims array. Each claim becomes one analysis_claims row with
-// kind="explain", analysisId set (NOT draftId — that's Canvas 2's column).
+// kind="explain", analysisId set (NOT draftId — that's Phase 2's column).
 async function persistCanvas1Claims(analysisId: number, result: unknown): Promise<void> {
   type Claim = {
     anchorId: string;

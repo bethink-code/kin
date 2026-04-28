@@ -20,7 +20,7 @@ export function registerRoutes(app: Express) {
   app.use(statementsRouter);
   app.use(analysisRouter);
   app.use(qaRouter);
-  // Canvas 2 — draft lifecycle + refining conversation.
+  // Phase 2 — draft lifecycle + refining conversation.
   app.use(analysisDraftRouter);
   app.use(analysisConversationRouter);
   // Universal sub-step primitive (Slice 1 of the architecture rewrite).

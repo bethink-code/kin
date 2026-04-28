@@ -4,20 +4,20 @@ import { useAuth } from "@/hooks/useAuth";
 import { TopBar } from "@/components/layout/TopBar";
 import { TwoPane } from "@/components/layout/TwoPane";
 import { PictureGather } from "@/components/picture/PictureGather";
-import { PictureAnalyse } from "@/components/picture/PictureAnalyse";
+import { PictureDraft } from "@/components/picture/PictureDraft";
 import { PictureDiscuss } from "@/components/picture/PictureDiscuss";
 import { PictureLive } from "@/components/picture/PictureLive";
 import { AllyPane } from "@/components/picture/AllyPane";
-import { AnalysisAnalyse } from "@/components/analysis/AnalysisAnalyse";
+import { AnalysisDraft } from "@/components/analysis/AnalysisDraft";
 import { AnalysisDiscuss } from "@/components/analysis/AnalysisDiscuss";
 import { AnalysisLive } from "@/components/analysis/AnalysisLive";
-import { BeatLanding } from "@/components/BeatLanding";
-import { BeatTransition } from "@/components/BeatTransition";
-import type { CanvasKey } from "@/lib/canvasCopy";
-import type { Beat } from "@/lib/beats";
+import { StepController } from "@/components/StepController";
+import { StepTransition } from "@/components/StepTransition";
+import type { PhaseKey } from "@/lib/canvasCopy";
+import type { Step } from "@/lib/steps";
 import {
-  getCanvasCurrentBeat,
-  getBeatRelation,
+  getPhaseCurrentStep,
+  getStepRelation,
   isPeekMode,
   type NavContext,
 } from "@/lib/navigation";
@@ -38,8 +38,8 @@ import type {
 // Tab-click navigation goes through three stages:
 //   'landing'      — summary card explaining what they're opening
 //   'transitioning'— brief loader (StoryRotator + Ally line) — only fires for
-//                    past + current peeks; future-beat CTAs go straight back
-//   null           — show actual beat content (live mode for current,
+//                    past + current peeks; future-step CTAs go straight back
+//   null           — show actual step content (live mode for current,
 //                    peek mode for past, never reached for future since the
 //                    future-CTA is "Back to current" which clears overrides)
 type TabNavStage = "landing" | "transitioning" | null;
@@ -63,7 +63,7 @@ export default function Dashboard() {
     refetchInterval: (query) => {
       const d = query.state.data;
       if (!d) return false;
-      return d.subStep.beat === "analyse" ? 2500 : false;
+      return d.subStep.step === "draft" ? 2500 : false;
     },
   });
   const statementsQ = useQuery<Statement[]>({
@@ -75,11 +75,11 @@ export default function Dashboard() {
     enabled: !!user,
   });
 
-  const [viewingCanvas, setViewingCanvas] = useState<CanvasKey | null>(null);
-  // Per-canvas beat override for tab-click peek navigation. One bag for all
+  const [viewingCanvas, setViewingCanvas] = useState<PhaseKey | null>(null);
+  // Per-canvas step override for tab-click peek navigation. One bag for all
   // four canvases so the same machinery works on picture, analysis, plan
   // and progress without per-canvas state ladders.
-  const [viewingBeats, setViewingBeats] = useState<Record<CanvasKey, Beat | null>>({
+  const [viewingBeats, setViewingBeats] = useState<Record<PhaseKey, Step | null>>({
     picture: null,
     analysis: null,
     plan: null,
@@ -87,8 +87,8 @@ export default function Dashboard() {
   });
   const [tabNavStage, setTabNavStage] = useState<TabNavStage>(null);
 
-  // First-arrival landing: when the user lands on a beat they've never seen
-  // before, auto-fire the interstitial. Per-(canvas, beat, instance) — once
+  // First-arrival landing: when the user lands on a step they've never seen
+  // before, auto-fire the interstitial. Per-(canvas, step, instance) — once
   // dismissed it doesn't re-show on refresh; a new instance does.
   //
   // IMPORTANT: hooks must be called unconditionally on every render (Rules
@@ -97,7 +97,7 @@ export default function Dashboard() {
   useEffect(() => {
     const sub = subStepQ.data?.subStep;
     if (!sub || tabNavStage !== null) return;
-    if (!hasSeenLanding(sub.canvasKey as CanvasKey, sub.beat as Beat, sub.instance)) {
+    if (!hasSeenLanding(sub.phaseKey as PhaseKey, sub.step as Step, sub.instance)) {
       setTabNavStage("landing");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -107,7 +107,7 @@ export default function Dashboard() {
 
   // Gate the whole render on the sub-step query settling (success OR error).
   // Quiet "Settling in" frame so first paint doesn't flicker through fallback
-  // canvas/beat derivations as queries arrive in different orders.
+  // canvas/step derivations as queries arrive in different orders.
   if (subStepQ.isPending) {
     return (
       <div className="flex items-center justify-center h-screen text-sm text-muted-foreground italic">
@@ -118,7 +118,7 @@ export default function Dashboard() {
 
   const subStep = subStepQ.data?.subStep ?? null;
 
-  // Single nav context. Every navigation decision (relation, current beat,
+  // Single nav context. Every navigation decision (relation, current step,
   // peek mode, clickability) reads from this so callers stay consistent.
   const navCtx: NavContext = {
     subStep,
@@ -129,22 +129,22 @@ export default function Dashboard() {
   };
 
   // Natural canvas: where the user's sub-step actually is.
-  const naturalCanvas: CanvasKey =
-    (subStep?.canvasKey as CanvasKey | undefined) ??
+  const naturalCanvas: PhaseKey =
+    (subStep?.phaseKey as PhaseKey | undefined) ??
     (conversationQ.data?.conversation?.status === "complete" || draftQ.data ? "analysis" : "picture");
-  const effectiveCanvas: CanvasKey = viewingCanvas ?? naturalCanvas;
+  const effectiveCanvas: PhaseKey = viewingCanvas ?? naturalCanvas;
 
-  // Effective beat = peek override for this canvas (if set) OR canvas's
-  // actual current beat from the navigation module.
-  const effectiveBeat: Beat =
-    viewingBeats[effectiveCanvas] ?? getCanvasCurrentBeat(effectiveCanvas, navCtx);
+  // Effective step = peek override for this canvas (if set) OR canvas's
+  // actual current step from the navigation module.
+  const effectiveStep: Step =
+    viewingBeats[effectiveCanvas] ?? getPhaseCurrentStep(effectiveCanvas, navCtx);
 
-  function onNavigateSubStep(canvas: CanvasKey, subStepKey: string) {
+  function onNavigateSubStep(canvas: PhaseKey, subStepKey: string) {
     setViewingCanvas(canvas === naturalCanvas ? null : canvas);
     if (isBeat(subStepKey)) {
-      // Override clears if user clicked their actual current beat (no peek
+      // Override clears if user clicked their actual current step (no peek
       // needed). Otherwise set the override.
-      const isOwnCurrent = subStep?.canvasKey === canvas && subStepKey === subStep.beat;
+      const isOwnCurrent = subStep?.phaseKey === canvas && subStepKey === subStep.step;
       setViewingBeats((prev) => ({
         ...prev,
         [canvas]: isOwnCurrent ? null : subStepKey,
@@ -153,8 +153,8 @@ export default function Dashboard() {
     setTabNavStage("landing");
   }
 
-  // Drop all overrides — return user to their natural canvas + beat. Used by
-  // the foot bar's "Back to current" CTA in peek mode and by future-beat
+  // Drop all overrides — return user to their natural canvas + step. Used by
+  // the foot bar's "Back to current" CTA in peek mode and by future-step
   // landing dismissals.
   function backToCurrent() {
     setViewingCanvas(null);
@@ -162,8 +162,8 @@ export default function Dashboard() {
     setTabNavStage(null);
   }
 
-  const peek = isPeekMode(effectiveCanvas, effectiveBeat, navCtx);
-  const beatRelation = getBeatRelation(effectiveCanvas, effectiveBeat, navCtx);
+  const peek = isPeekMode(effectiveCanvas, effectiveStep, navCtx);
+  const stepRelation = getStepRelation(effectiveCanvas, effectiveStep, navCtx);
 
   // Whether this is the user's very first landing ever — drives the
   // product-orientation copy on the Gather card (vs. the routine version).
@@ -180,28 +180,28 @@ export default function Dashboard() {
         <TwoPane
           left={
             tabNavStage === "landing" ? (
-              <BeatLanding
+              <StepController
                 canvas={effectiveCanvas}
-                beat={effectiveBeat}
-                relation={beatRelation}
+                step={effectiveStep}
+                relation={stepRelation}
                 isFirstEver={isFirstEver}
                 onCta={() => setTabNavStage("transitioning")}
                 onBackToCurrent={backToCurrent}
               />
             ) : tabNavStage === "transitioning" ? (
-              <BeatTransition
+              <StepTransition
                 canvas={effectiveCanvas === "plan" || effectiveCanvas === "progress" ? "picture" : effectiveCanvas}
-                beat={effectiveBeat}
-                // Mark the landing for the user's CURRENT beat as seen so it
+                step={effectiveStep}
+                // Mark the landing for the user's CURRENT step as seen so it
                 // won't auto-fire on refresh. (For tab-click peeks, the
-                // current beat is what the user actually returns to.) Then
+                // current step is what the user actually returns to.) Then
                 // clear the stage. Override stays — peek mode persists until
                 // the user explicitly clicks "Back to current".
                 onDone={() => {
                   if (subStep) {
                     markLandingSeen(
-                      subStep.canvasKey as CanvasKey,
-                      subStep.beat as Beat,
+                      subStep.phaseKey as PhaseKey,
+                      subStep.step as Step,
                       subStep.instance,
                     );
                   }
@@ -216,14 +216,14 @@ export default function Dashboard() {
             ) : effectiveCanvas === "analysis" ? (
               <AnalysisContent
                 subStep={subStep}
-                effectiveBeat={effectiveBeat}
+                effectiveStep={effectiveStep}
                 peek={peek}
                 onBackToCurrent={backToCurrent}
               />
             ) : (
               <PictureContent
                 subStep={subStep}
-                effectiveBeat={effectiveBeat}
+                effectiveStep={effectiveStep}
                 peek={peek}
                 onBackToCurrent={backToCurrent}
                 onContinueToAnalysis={() => {
@@ -240,8 +240,8 @@ export default function Dashboard() {
   );
 }
 
-function isBeat(k: string): k is Beat {
-  return k === "gather" || k === "analyse" || k === "discuss" || k === "live";
+function isBeat(k: string): k is Step {
+  return k === "gather" || k === "draft" || k === "discuss" || k === "live";
 }
 
 function ComingSoonPane({ onBack }: { onBack: () => void }) {
@@ -263,13 +263,13 @@ function ComingSoonPane({ onBack }: { onBack: () => void }) {
 
 function PictureContent({
   subStep,
-  effectiveBeat,
+  effectiveStep,
   peek,
   onBackToCurrent,
   onContinueToAnalysis,
 }: {
   subStep: SubStep | null;
-  effectiveBeat: Beat;
+  effectiveStep: Step;
   peek: boolean;
   onBackToCurrent: () => void;
   onContinueToAnalysis: () => void;
@@ -281,11 +281,11 @@ function PictureContent({
       </div>
     );
   }
-  switch (effectiveBeat) {
+  switch (effectiveStep) {
     case "gather":
       return <PictureGather subStep={subStep} peek={peek} onBackToCurrent={onBackToCurrent} />;
-    case "analyse":
-      return <PictureAnalyse subStep={subStep} peek={peek} onBackToCurrent={onBackToCurrent} />;
+    case "draft":
+      return <PictureDraft subStep={subStep} peek={peek} onBackToCurrent={onBackToCurrent} />;
     case "discuss":
       return <PictureDiscuss subStep={subStep} peek={peek} onBackToCurrent={onBackToCurrent} />;
     case "live":
@@ -302,12 +302,12 @@ function PictureContent({
 
 function AnalysisContent({
   subStep,
-  effectiveBeat,
+  effectiveStep,
   peek,
   onBackToCurrent,
 }: {
   subStep: SubStep | null;
-  effectiveBeat: Beat;
+  effectiveStep: Step;
   peek: boolean;
   onBackToCurrent: () => void;
 }) {
@@ -318,10 +318,10 @@ function AnalysisContent({
       </div>
     );
   }
-  switch (effectiveBeat) {
+  switch (effectiveStep) {
     case "gather":
-    case "analyse":
-      return <AnalysisAnalyse subStep={subStep} peek={peek} onBackToCurrent={onBackToCurrent} />;
+    case "draft":
+      return <AnalysisDraft subStep={subStep} peek={peek} onBackToCurrent={onBackToCurrent} />;
     case "discuss":
       return <AnalysisDiscuss subStep={subStep} peek={peek} onBackToCurrent={onBackToCurrent} />;
     case "live":

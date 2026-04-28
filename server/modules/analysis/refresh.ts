@@ -5,7 +5,7 @@ import { getActivePrompt } from "../prompts/getPrompt";
 import { analyseStatements } from "./analyse";
 
 /**
- * Kick off a fresh Canvas 1 analyse pass for `userId`. Inserts an in-progress
+ * Kick off a fresh Phase 1 analyse pass for `userId`. Inserts an in-progress
  * `analyses` row, returns its id immediately, and runs the actual work in the
  * background — the new analysis lands on /api/analysis/latest when ready.
  *
@@ -73,7 +73,7 @@ export async function refreshCanvas1Analysis(
         .where(
           and(
             eq(subSteps.userId, userId),
-            eq(subSteps.canvasKey, "picture"),
+            eq(subSteps.phaseKey, "picture"),
             isNull(subSteps.supersededAt),
           ),
         );
@@ -90,7 +90,7 @@ export async function refreshCanvas1Analysis(
   return { analysisId: created.id, status: "analysing" };
 }
 
-// Persist Canvas 1 explain claims for an analyses row. Used by both /run +
+// Persist Phase 1 explain claims for an analyses row. Used by both /run +
 // /refresh paths; the sub-step worker has its own (functionally-equivalent)
 // copy. All three feed the same analysis_claims table with analysis_id set.
 export async function persistAnalysisClaims(analysisId: number, result: unknown): Promise<void> {

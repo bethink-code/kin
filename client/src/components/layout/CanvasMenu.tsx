@@ -2,21 +2,21 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { UserAvatar, getInitials } from "./Avatars";
-import { BEAT_ORDER, type Beat } from "@/lib/beats";
+import { STEP_ORDER, type Step } from "@/lib/steps";
 import { formatDateLong, formatDate, formatTimeAgo } from "@/lib/formatters";
 import {
-  CANVAS_KEYS,
-  CANVAS_PILL_LABEL,
-  CANVAS_CARD_TITLE,
-  CANVAS_TAB_CAPTION,
-  BEAT_LABEL,
-  canvasStates,
-  type CanvasKey,
+  PHASE_KEYS,
+  PHASE_PILL_LABEL,
+  PHASE_CARD_TITLE,
+  PHASE_TAB_CAPTION,
+  STEP_LABEL,
+  phaseStates,
+  type PhaseKey,
 } from "@/lib/canvasCopy";
 import type { Statement, Analysis, AnalysisDraft, SubStep, SubStepMessage } from "@shared/schema";
 
-// Canvas pill + megamenu (the arc per brief §6). The menu has four sections:
-//   1. Canvas tab bar (the four canvases across the top) — clicks swap the
+// Phase pill + megamenu (the arc per brief §6). The menu has four sections:
+//   1. Phase tab bar (the four canvases across the top) — clicks swap the
 //      view INSIDE the modal only, they never navigate.
 //   2. Ally narration paragraph (follows the viewed tab)
 //   3. The four stage cards within the viewed canvas — clicks navigate and
@@ -28,8 +28,8 @@ export function CanvasMenu({
   activeCanvas,
   onNavigateSubStep,
 }: {
-  activeCanvas: CanvasKey;
-  onNavigateSubStep?: (canvas: CanvasKey, subStep: string) => void;
+  activeCanvas: PhaseKey;
+  onNavigateSubStep?: (canvas: PhaseKey, subStep: string) => void;
 }) {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
@@ -43,7 +43,7 @@ export function CanvasMenu({
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
-  // Queries that drive the inline beat timeline on the trigger pill (and that
+  // Queries that drive the inline step timeline on the trigger pill (and that
   // also feed the megamenu's stage cards). Pulling them up to the outer scope
   // means trigger + megamenu read the same data.
   const subStepQ = useQuery<{ subStep: SubStep; messages: SubStepMessage[] } | null>({
@@ -53,14 +53,14 @@ export function CanvasMenu({
   const analysisQ = useQuery<Analysis | null>({ queryKey: ["/api/analysis/latest"] });
   const draftQ = useQuery<AnalysisDraft | null>({ queryKey: ["/api/analysis-draft/current"] });
 
-  // Beat for the currently-active canvas. Sub-step query is the user's
-  // forward-facing position; if they're on the picture canvas, the beat we
+  // Step for the currently-active canvas. Sub-step query is the user's
+  // forward-facing position; if they're on the picture canvas, the step we
   // care about is picture's; same for analysis. When the user is *viewing*
   // a different canvas via the menu (past view), fall back to its terminal
-  // beat (Live).
-  const activeBeat: Beat = (() => {
+  // step (Live).
+  const activeStep: Step = (() => {
     const sub = subStepQ.data?.subStep;
-    if (sub && sub.canvasKey === activeCanvas) return sub.beat as Beat;
+    if (sub && sub.phaseKey === activeCanvas) return sub.step as Step;
     if (activeCanvas === "picture") return "live";
     if (activeCanvas === "analysis") return "live";
     return "gather";
@@ -71,7 +71,7 @@ export function CanvasMenu({
       <PillTrigger
         user={user}
         activeCanvas={activeCanvas}
-        currentBeat={activeBeat}
+        currentStep={activeStep}
         statements={statementsQ.data ?? []}
         analysis={analysisQ.data ?? null}
         draft={draftQ.data ?? null}
@@ -90,7 +90,7 @@ export function CanvasMenu({
           <div
             role="dialog"
             aria-modal="true"
-            aria-label="Canvas navigation"
+            aria-label="Phase navigation"
             className="fixed inset-x-0 top-28 z-50 flex justify-center px-4 pointer-events-none"
           >
             <div className="w-full max-w-5xl rounded-xl border border-border bg-card shadow-2xl pointer-events-auto">
@@ -108,13 +108,13 @@ export function CanvasMenu({
 }
 
 // The trigger element of the canvas menu — replaces the old small pill button.
-// Visually a wide cream capsule with: avatar | canvas title | inline beat
+// Visually a wide cream capsule with: avatar | canvas title | inline step
 // timeline. Clicking anywhere on the capsule opens the megamenu (same as
 // the original pill's behaviour).
 function PillTrigger({
   user: _user,
   activeCanvas,
-  currentBeat,
+  currentStep,
   statements,
   analysis,
   draft,
@@ -124,19 +124,19 @@ function PillTrigger({
   onNavigateSubStep,
 }: {
   user: ReturnType<typeof useAuth>["user"];
-  activeCanvas: CanvasKey;
-  currentBeat: Beat;
+  activeCanvas: PhaseKey;
+  currentStep: Step;
   statements: Statement[];
   analysis: Analysis | null;
   draft: AnalysisDraft | null;
   subStep: SubStep | null;
   open: boolean;
   onToggle: () => void;
-  onNavigateSubStep?: (canvas: CanvasKey, subStep: string) => void;
+  onNavigateSubStep?: (canvas: PhaseKey, subStep: string) => void;
 }) {
   const extractedCount = statements.filter((s) => s.status === "extracted").length;
   const analysisDone = analysis?.status === "done";
-  const currentIdx = BEAT_ORDER.indexOf(currentBeat);
+  const currentIdx = STEP_ORDER.indexOf(currentStep);
 
   // Container is a div, not a button — past/current beats are individually
   // clickable to jump straight to that sub-step, and the title carries an
@@ -152,7 +152,7 @@ function PillTrigger({
         title="Open canvas menu"
       >
         <span className="font-serif text-xl text-foreground leading-none">
-          {CANVAS_CARD_TITLE[activeCanvas]}
+          {PHASE_CARD_TITLE[activeCanvas]}
         </span>
         <span
           className={`text-foreground/60 text-sm transition-transform ${open ? "rotate-180" : ""}`}
@@ -162,27 +162,27 @@ function PillTrigger({
         </span>
       </button>
       <ol className="flex items-center gap-1">
-        {BEAT_ORDER.map((beat, i) => {
+        {STEP_ORDER.map((step, i) => {
           const relation: "past" | "current" | "future" =
             i < currentIdx ? "past" : i === currentIdx ? "current" : "future";
-          const meta = BEAT_LABEL[activeCanvas][beat];
-          const title = meta.title || (beat === "gather" ? "Pulled in" : beat);
-          const caption = beatCaption(activeCanvas, beat, relation, {
+          const meta = STEP_LABEL[activeCanvas][step];
+          const title = meta.title || (step === "gather" ? "Pulled in" : step);
+          const caption = beatCaption(activeCanvas, step, relation, {
             extractedCount,
             analysisDone,
             draft,
             subStep,
           });
-          // Permissive: every beat in the inline pill timeline is clickable
+          // Permissive: every step in the inline pill timeline is clickable
           // — past/current go through landing → transition → content; future
           // go through landing → "Back to current" (no transition). Single
           // rule via the new navigation module.
           const clickable = !!onNavigateSubStep;
           const handleClick = clickable
-            ? () => onNavigateSubStep?.(activeCanvas, beat)
+            ? () => onNavigateSubStep?.(activeCanvas, step)
             : undefined;
           return (
-            <li key={beat} className="flex items-center gap-1">
+            <li key={step} className="flex items-center gap-1">
               {i > 0 && <span className="text-foreground/30 text-[11px]">—</span>}
               <BeatStep
                 title={title}
@@ -249,26 +249,26 @@ function BeatStep({
 }
 
 function beatCaption(
-  canvas: CanvasKey,
-  beat: Beat,
+  canvas: PhaseKey,
+  step: Step,
   relation: "past" | "current" | "future",
   ctx: { extractedCount: number; analysisDone: boolean; draft: AnalysisDraft | null; subStep: SubStep | null },
 ): string {
   if (relation === "future") return "—";
   if (canvas === "picture") {
-    if (beat === "gather") {
+    if (step === "gather") {
       if (relation === "current") return ctx.extractedCount > 0 ? `${ctx.extractedCount} read` : "ready";
       return "done";
     }
-    if (beat === "analyse") {
+    if (step === "draft") {
       if (relation === "current") return ctx.analysisDone ? "just done" : "writing";
       return "done";
     }
-    if (beat === "discuss") {
+    if (step === "discuss") {
       if (relation === "current") return "in conversation";
       return "done";
     }
-    if (beat === "live") {
+    if (step === "live") {
       if (relation === "current") {
         const at = ctx.subStep?.agreedAt ?? ctx.subStep?.startedAt ?? null;
         return at ? `agreed ${formatDate(at as unknown as string)}` : "agreed";
@@ -277,10 +277,10 @@ function beatCaption(
     }
   }
   if (canvas === "analysis") {
-    if (beat === "gather") return relation === "current" ? "pulling in" : "done";
-    if (beat === "analyse") return relation === "current" ? "thinking" : "done";
-    if (beat === "discuss") return relation === "current" ? "refining" : "done";
-    if (beat === "live") {
+    if (step === "gather") return relation === "current" ? "pulling in" : "done";
+    if (step === "draft") return relation === "current" ? "thinking" : "done";
+    if (step === "discuss") return relation === "current" ? "refining" : "done";
+    if (step === "live") {
       if (relation === "current") {
         const at = ctx.draft?.agreedAt ?? ctx.subStep?.agreedAt ?? null;
         return at ? `agreed ${formatDate(at as unknown as string)}` : "agreed";
@@ -296,9 +296,9 @@ function Arc({
   onClose,
   onNavigateSubStep,
 }: {
-  activeCanvas: CanvasKey;
+  activeCanvas: PhaseKey;
   onClose: () => void;
-  onNavigateSubStep?: (canvas: CanvasKey, subStep: string) => void;
+  onNavigateSubStep?: (canvas: PhaseKey, subStep: string) => void;
 }) {
   const { user } = useAuth();
   const statementsQ = useQuery<Statement[]>({ queryKey: ["/api/statements"] });
@@ -307,7 +307,7 @@ function Arc({
   const conversationQ = useQuery<{ conversation: { status?: string } | null } | null>({
     queryKey: ["/api/qa/conversation"],
   });
-  // Canvas 1's current beat comes from the sub-step primitive.
+  // Phase 1's current step comes from the sub-step primitive.
   const subStepQ = useQuery<{ subStep: SubStep; messages: SubStepMessage[] } | null>({
     queryKey: ["/api/sub-step/current"],
   });
@@ -315,19 +315,19 @@ function Arc({
   // Which canvas's tab the user is currently PEEKING at inside the modal.
   // Independent from the actual active canvas — tab clicks just swap this
   // local view. Navigation only happens when a stage card is clicked.
-  const [viewingTab, setViewingTab] = useState<CanvasKey>(activeCanvas);
+  const [viewingTab, setViewingTab] = useState<PhaseKey>(activeCanvas);
   useEffect(() => {
     setViewingTab(activeCanvas);
   }, [activeCanvas]);
 
-  const pictureBeat: Beat =
-    subStepQ.data?.subStep && subStepQ.data.subStep.canvasKey === "picture"
-      ? (subStepQ.data.subStep.beat as Beat)
+  const pictureBeat: Step =
+    subStepQ.data?.subStep && subStepQ.data.subStep.phaseKey === "picture"
+      ? (subStepQ.data.subStep.step as Step)
       : "gather";
-  const analysisBeat: Beat =
-    subStepQ.data?.subStep && subStepQ.data.subStep.canvasKey === "analysis"
-      ? (subStepQ.data.subStep.beat as Beat)
-      : "analyse";
+  const analysisBeat: Step =
+    subStepQ.data?.subStep && subStepQ.data.subStep.phaseKey === "analysis"
+      ? (subStepQ.data.subStep.step as Step)
+      : "draft";
   const extractedCount = (statementsQ.data ?? []).filter((s) => s.status === "extracted").length;
   const analysisDone = analysisQ.data?.status === "done";
   const draft = draftQ.data ?? null;
@@ -337,20 +337,20 @@ function Arc({
   // status field back to "active" but doesn't undo downstream state, so we
   // derive "agreed" from the most durable signal:
   //   picture  — any analysis_draft exists (startCanvas2 only fires after
-  //              Canvas 1 agree), OR the legacy status is still "complete"
+  //              Phase 1 agree), OR the legacy status is still "complete"
   //   analysis — the active draft is agreed
-  // This survives Canvas 1 reopen so the picture tab stays navigable.
-  const agreedCanvases = new Set<CanvasKey>();
+  // This survives Phase 1 reopen so the picture tab stays navigable.
+  const agreedPhases = new Set<PhaseKey>();
   if (
     draftQ.data != null ||
     conversationQ.data?.conversation?.status === "complete"
   ) {
-    agreedCanvases.add("picture");
+    agreedPhases.add("picture");
   }
-  if (draft?.status === "agreed") agreedCanvases.add("analysis");
+  if (draft?.status === "agreed") agreedPhases.add("analysis");
 
   const handleStageClick = onNavigateSubStep
-    ? (canvas: CanvasKey, subStep: string) => {
+    ? (canvas: PhaseKey, subStep: string) => {
         onNavigateSubStep(canvas, subStep);
         onClose();
       }
@@ -360,7 +360,7 @@ function Arc({
     <div>
       <CanvasTabs
         viewingTab={viewingTab}
-        agreedCanvases={agreedCanvases}
+        agreedPhases={agreedPhases}
         onSelect={setViewingTab}
       />
       <div className="px-8 py-8 space-y-6">
@@ -372,7 +372,7 @@ function Arc({
         />
         {viewingTab === "picture" && (
           <PictureStages
-            currentBeat={pictureBeat}
+            currentStep={pictureBeat}
             extractedCount={extractedCount}
             analysisDone={analysisDone}
             onStageClick={handleStageClick}
@@ -380,7 +380,7 @@ function Arc({
         )}
         {viewingTab === "analysis" && (
           <AnalysisStages
-            currentBeat={analysisBeat}
+            currentStep={analysisBeat}
             draft={draft}
             onStageClick={handleStageClick}
           />
@@ -395,17 +395,17 @@ function Arc({
 
 function CanvasTabs({
   viewingTab,
-  agreedCanvases,
+  agreedPhases,
   onSelect,
 }: {
-  viewingTab: CanvasKey;
-  agreedCanvases: ReadonlySet<CanvasKey>;
-  onSelect: (k: CanvasKey) => void;
+  viewingTab: PhaseKey;
+  agreedPhases: ReadonlySet<PhaseKey>;
+  onSelect: (k: PhaseKey) => void;
 }) {
-  const states = canvasStates(viewingTab, agreedCanvases);
+  const states = phaseStates(viewingTab, agreedPhases);
   return (
     <div className="grid grid-cols-4 border-b border-border pt-8">
-      {CANVAS_KEYS.map((k) => {
+      {PHASE_KEYS.map((k) => {
         const state = states[k];
         const isCurrent = state === "current";
         const isPast = state === "past";
@@ -421,14 +421,14 @@ function CanvasTabs({
                 isCurrent ? "text-foreground" : isPast ? "text-foreground/80" : "text-muted-foreground"
               }`}
             >
-              {CANVAS_CARD_TITLE[k]}
+              {PHASE_CARD_TITLE[k]}
             </div>
             <div
               className={`text-[11px] mt-0.5 ${
                 isCurrent ? "text-accent" : "text-muted-foreground/70"
               }`}
             >
-              {CANVAS_TAB_CAPTION[state]}
+              {PHASE_TAB_CAPTION[state]}
             </div>
           </>
         );
@@ -468,8 +468,8 @@ function Narration({
   extractedCount,
   userCreatedAt,
 }: {
-  activeCanvas: CanvasKey;
-  pictureBeat: Beat;
+  activeCanvas: PhaseKey;
+  pictureBeat: Step;
   extractedCount: number;
   userCreatedAt?: string;
 }) {
@@ -492,8 +492,8 @@ function narrationFor({
   extractedCount,
   userCreatedAt,
 }: {
-  activeCanvas: CanvasKey;
-  pictureBeat: Beat;
+  activeCanvas: PhaseKey;
+  pictureBeat: Step;
   extractedCount: number;
   userCreatedAt?: string;
 }): string[] {
@@ -521,7 +521,7 @@ function narrationFor({
       `You've uploaded ${extractedCount} ${word} so far. Keep going when you're ready — twelve months gives me a full year to work with.`,
     ];
   }
-  if (pictureBeat === "analyse") {
+  if (pictureBeat === "draft") {
     return [
       "I'm reading across everything you've uploaded and writing you a first take. Give me a minute or two — this is the important bit.",
     ];
@@ -538,23 +538,23 @@ function narrationFor({
 }
 
 function PictureStages({
-  currentBeat,
+  currentStep,
   extractedCount,
   analysisDone,
   onStageClick,
 }: {
-  currentBeat: Beat;
+  currentStep: Step;
   extractedCount: number;
   analysisDone: boolean;
-  onStageClick?: (canvas: CanvasKey, subStep: string) => void;
+  onStageClick?: (canvas: PhaseKey, subStep: string) => void;
 }) {
-  const currentIdx = BEAT_ORDER.indexOf(currentBeat);
+  const currentIdx = STEP_ORDER.indexOf(currentStep);
 
   return (
     <div className="space-y-2">
       <SectionLabel>The four beats of your financial snapshot</SectionLabel>
       <div className="grid grid-cols-4 gap-3">
-        {BEAT_ORDER.map((beat, i) => {
+        {STEP_ORDER.map((step, i) => {
           const relation: "past" | "current" | "next" | "future" =
             i < currentIdx
               ? "past"
@@ -564,17 +564,17 @@ function PictureStages({
                   ? "next"
                   : "future";
 
-          const meta = BEAT_LABEL.picture[beat];
-          const status = pictureBeatStatus(beat, relation, extractedCount, analysisDone);
-          // Permissive: every beat clickable — Dashboard's landing/transition
+          const meta = STEP_LABEL.picture[step];
+          const status = pictureStepStatus(step, relation, extractedCount, analysisDone);
+          // Permissive: every step clickable — Dashboard's landing/transition
           // flow handles past/current/future variants.
           const clickable = !!onStageClick;
           const handleClick =
-            clickable && onStageClick ? () => onStageClick("picture", beat) : undefined;
+            clickable && onStageClick ? () => onStageClick("picture", step) : undefined;
 
           return (
             <StageCard
-              key={beat}
+              key={step}
               badge={String(i + 1)}
               title={meta.title}
               description={meta.description}
@@ -589,25 +589,25 @@ function PictureStages({
   );
 }
 
-function pictureBeatStatus(
-  beat: Beat,
+function pictureStepStatus(
+  step: Step,
   relation: "past" | "current" | "next" | "future",
   extractedCount: number,
   analysisDone: boolean,
 ): string {
-  if (beat === "gather") {
+  if (step === "gather") {
     if (relation === "current") {
       const toGo = Math.max(0, 12 - extractedCount);
       return toGo > 0 ? `${extractedCount} read · ${toGo} to go` : `${extractedCount} read`;
     }
     return relation === "past" ? `${extractedCount} · done` : "—";
   }
-  if (beat === "analyse") {
+  if (step === "draft") {
     if (relation === "current") return analysisDone ? "just done" : "writing";
     if (relation === "next") return "opens when Gather is done";
     return relation === "past" ? "done" : "—";
   }
-  if (beat === "discuss") {
+  if (step === "discuss") {
     if (relation === "current") return "in conversation";
     if (relation === "next") return "opens when the first take lands";
     return relation === "past" ? "done" : "—";
@@ -690,21 +690,21 @@ function HistoryFooter({ userCreatedAt, onClose }: { userCreatedAt?: string; onC
 }
 
 function AnalysisStages({
-  currentBeat,
+  currentStep,
   draft,
   onStageClick,
 }: {
-  currentBeat: Beat;
+  currentStep: Step;
   draft: AnalysisDraft | null;
-  onStageClick?: (canvas: CanvasKey, subStep: string) => void;
+  onStageClick?: (canvas: PhaseKey, subStep: string) => void;
 }) {
-  const currentIdx = BEAT_ORDER.indexOf(currentBeat);
+  const currentIdx = STEP_ORDER.indexOf(currentStep);
 
   return (
     <div className="space-y-2">
       <SectionLabel>The four beats of our analysis</SectionLabel>
       <div className="grid grid-cols-4 gap-3">
-        {BEAT_ORDER.map((beat, i) => {
+        {STEP_ORDER.map((step, i) => {
           const relation: "past" | "current" | "next" | "future" =
             i < currentIdx
               ? "past"
@@ -714,19 +714,19 @@ function AnalysisStages({
                   ? "next"
                   : "future";
 
-          const meta = BEAT_LABEL.analysis[beat];
-          // Canvas 2's Gather is an invisible pull — if a user opens the menu
+          const meta = STEP_LABEL.analysis[step];
+          // Phase 2's Gather is an invisible pull — if a user opens the menu
           // during it (very short window), show a descriptive placeholder.
           const title = meta.title || "Pulled in";
           const description = meta.description || "Ally pulls in your agreed picture and gets to work.";
-          const status = analysisBeatStatus(beat, relation, draft);
+          const status = analysisStepStatus(step, relation, draft);
           const clickable = !!onStageClick;
           const handleClick =
-            clickable && onStageClick ? () => onStageClick("analysis", beat) : undefined;
+            clickable && onStageClick ? () => onStageClick("analysis", step) : undefined;
 
           return (
             <StageCard
-              key={beat}
+              key={step}
               badge={String(i + 1)}
               title={title}
               description={description}
@@ -741,22 +741,22 @@ function AnalysisStages({
   );
 }
 
-function analysisBeatStatus(
-  beat: Beat,
+function analysisStepStatus(
+  step: Step,
   relation: "past" | "current" | "next" | "future",
   draft: AnalysisDraft | null,
 ): string {
-  if (beat === "gather") {
+  if (step === "gather") {
     if (relation === "current") return "Pulling it in";
     if (relation === "past") return "Done";
     return relation === "next" ? "Starts when you agree your picture" : "—";
   }
-  if (beat === "analyse") {
+  if (step === "draft") {
     if (relation === "current") return "Thinking";
     if (relation === "past") return "Done";
     return relation === "next" ? "Opens when pulled in" : "—";
   }
-  if (beat === "discuss") {
+  if (step === "discuss") {
     if (relation === "current") return "Refining together";
     if (relation === "past") return "Done";
     return relation === "next" ? "Opens when ready" : "—";
@@ -770,29 +770,29 @@ function analysisBeatStatus(
 }
 
 // Placeholder stages for canvases not yet built. Cards clickable — clicks
-// route through the BeatLanding "Coming up" path which dismisses with
+// route through the StepController "Coming up" path which dismisses with
 // "Back to current" (no transition into non-existent content).
 function PlanStages({
   onStageClick,
 }: {
-  onStageClick?: (canvas: CanvasKey, subStep: string) => void;
+  onStageClick?: (canvas: PhaseKey, subStep: string) => void;
 }) {
   return (
     <div className="space-y-2">
       <SectionLabel>The four beats of your plan</SectionLabel>
       <div className="grid grid-cols-4 gap-3">
-        {BEAT_ORDER.map((beat, i) => {
-          const meta = BEAT_LABEL.plan[beat];
-          const title = meta.title || (beat === "gather" ? "Pulled in" : beat);
+        {STEP_ORDER.map((step, i) => {
+          const meta = STEP_LABEL.plan[step];
+          const title = meta.title || (step === "gather" ? "Pulled in" : step);
           const description = meta.description || "Pulls in your agreed analysis.";
-          const handleClick = onStageClick ? () => onStageClick("plan", beat) : undefined;
+          const handleClick = onStageClick ? () => onStageClick("plan", step) : undefined;
           return (
             <StageCard
-              key={beat}
+              key={step}
               badge={String(i + 1)}
               title={title}
               description={description}
-              status={beat === "live" ? "Pending your sign-off" : "Opens after analysis is agreed"}
+              status={step === "live" ? "Pending your sign-off" : "Opens after analysis is agreed"}
               relation="future"
               onClick={handleClick}
             />
@@ -809,20 +809,20 @@ function PlanStages({
 function ProgressStages({
   onStageClick,
 }: {
-  onStageClick?: (canvas: CanvasKey, subStep: string) => void;
+  onStageClick?: (canvas: PhaseKey, subStep: string) => void;
 }) {
   return (
     <div className="space-y-2">
       <SectionLabel>The four beats of your progress</SectionLabel>
       <div className="grid grid-cols-4 gap-3">
-        {BEAT_ORDER.map((beat, i) => {
-          const meta = BEAT_LABEL.progress[beat];
-          const title = meta.title || beat;
+        {STEP_ORDER.map((step, i) => {
+          const meta = STEP_LABEL.progress[step];
+          const title = meta.title || step;
           const description = meta.description || "—";
-          const handleClick = onStageClick ? () => onStageClick("progress", beat) : undefined;
+          const handleClick = onStageClick ? () => onStageClick("progress", step) : undefined;
           return (
             <StageCard
-              key={beat}
+              key={step}
               badge={String(i + 1)}
               title={title}
               description={description}

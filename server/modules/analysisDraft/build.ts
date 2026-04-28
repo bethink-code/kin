@@ -10,7 +10,7 @@ import type {
 } from "./schema";
 import type { z } from "zod";
 
-// One Canvas 2 draft = one call to facts, then prose + panels in parallel.
+// One Phase 2 draft = one call to facts, then prose + panels in parallel.
 // This module is pure: it does not touch the database. The route persists the
 // output (and extracts claim rows) once this returns.
 
@@ -130,8 +130,8 @@ function extractClaims(
       }
     }
   }
-  for (const beat of panels.beats) {
-    for (const ann of beat.annotations ?? []) {
+  for (const step of panels.beats) {
+    for (const ann of step.annotations ?? []) {
       addAnnotation(seen, ann, prose, panels, facts);
     }
   }

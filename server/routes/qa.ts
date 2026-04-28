@@ -174,7 +174,7 @@ router.get("/api/qa/conversation", async (req, res) => {
       userId: user.id,
       trigger: "session_resumed",
       canvas: "picture",
-      payload: { canvas: "picture", beat: "discuss" },
+      payload: { canvas: "picture", step: "discuss" },
     });
   }
 

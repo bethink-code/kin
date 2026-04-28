@@ -11,29 +11,29 @@ import {
 } from "@shared/schema";
 
 // ============================================================================
-// Sub-step orchestrator — the universal beat state machine.
+// Sub-step orchestrator — the universal step state machine.
 // See Scratch/ally_architecture_spec.md §3 and the Slice 1 plan.
 //
 // Responsibilities:
 //   - Return the user's currently active sub-step (creating it lazily if the
 //     user is legacy — never had a sub_steps row).
-//   - Advance a sub-step to the next beat.
-//   - Agree a Discuss beat → create Live instance.
-//   - Reopen a Live beat → create new Discuss instance (predecessor-chained).
+//   - Advance a sub-step to the next step.
+//   - Agree a Discuss step → create Live instance.
+//   - Reopen a Live step → create new Discuss instance (predecessor-chained).
 //
-// Slice 1 scope: Canvas 1 (picture) only. Canvas 2 still runs on the legacy
+// Slice 1 scope: Phase 1 (picture) only. Phase 2 still runs on the legacy
 // `analysis_drafts` path and does NOT touch sub_steps yet.
 // ============================================================================
 
-type Canvas = "picture" | "analysis" | "plan" | "progress";
-type Beat = "gather" | "analyse" | "discuss" | "live";
+type Phase = "picture" | "analysis" | "plan" | "progress";
+type Step = "gather" | "draft" | "discuss" | "live";
 type Status = "not_started" | "in_progress" | "agreed" | "superseded" | "paused";
 
 // --- Reading ---------------------------------------------------------------
 
 /**
  * Returns the user's currently active sub-step. If they have no sub-steps yet
- * (legacy user), derives their current position from the Canvas 1 legacy
+ * (legacy user), derives their current position from the Phase 1 legacy
  * tables and inserts the corresponding row.
  *
  * "Active" = the most recent non-superseded, non-agreed-and-closed row on the
@@ -55,16 +55,16 @@ async function currentForUser(userId: string): Promise<SubStep | null> {
   return rows[0] ?? null;
 }
 
-// --- Lazy backfill from legacy Canvas 1 state ------------------------------
+// --- Lazy backfill from legacy Phase 1 state ------------------------------
 
 /**
  * First-time derivation of the user's current sub-step from legacy data.
- * Covers Canvas 1 AND Canvas 2 — decides which canvas + beat the user is
+ * Covers Phase 1 AND Phase 2 — decides which canvas + step the user is
  * currently on based on the most-advanced legacy signal.
  *
- * Canvas 2 takes precedence over Canvas 1 once they've agreed their picture
+ * Phase 2 takes precedence over Phase 1 once they've agreed their picture
  * (conversations.status=complete). The user's forward-facing sub-step is in
- * Canvas 2 from that point onwards.
+ * Phase 2 from that point onwards.
  */
 async function lazyBackfill(userId: string): Promise<SubStep> {
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
@@ -109,8 +109,8 @@ async function lazyBackfill(userId: string): Promise<SubStep> {
     .insert(subSteps)
     .values({
       userId,
-      canvasKey: derived.canvas,
-      beat: derived.beat,
+      phaseKey: derived.canvas,
+      step: derived.step,
       instance: 1,
       status: derived.status,
       driver: derived.driver,
@@ -129,19 +129,19 @@ function deriveCurrentFromLegacy(input: {
   latestDraftId: number | null;
   latestDraftStatus: string | null;
 }): {
-  canvas: Canvas;
-  beat: Beat;
+  canvas: Phase;
+  step: Step;
   status: Status;
   driver: "person" | "ally" | "both";
   contentJson: unknown;
 } {
-  // Canvas 2 precedence: once they've agreed their picture, they're on Canvas 2.
+  // Phase 2 precedence: once they've agreed their picture, they're on Phase 2.
   if (input.conversationStatus === "complete") {
-    // Map existing analysis_draft status into a Canvas 2 beat.
+    // Map existing analysis_draft status into a Phase 2 step.
     if (input.latestDraftStatus === "agreed") {
       return {
         canvas: "analysis",
-        beat: "live",
+        step: "live",
         status: "in_progress",
         driver: "both",
         contentJson: { draftId: input.latestDraftId, analysisId: input.latestAnalysisId },
@@ -150,7 +150,7 @@ function deriveCurrentFromLegacy(input: {
     if (input.latestDraftStatus === "ready") {
       return {
         canvas: "analysis",
-        beat: "discuss",
+        step: "discuss",
         status: "in_progress",
         driver: "both",
         contentJson: { draftId: input.latestDraftId, analysisId: input.latestAnalysisId },
@@ -159,28 +159,28 @@ function deriveCurrentFromLegacy(input: {
     if (input.latestDraftStatus === "thinking" || input.latestDraftStatus === "failed") {
       return {
         canvas: "analysis",
-        beat: "analyse",
+        step: "draft",
         status: "in_progress",
         driver: "ally",
         contentJson: { draftId: input.latestDraftId, analysisId: input.latestAnalysisId },
       };
     }
-    // conv.complete but no draft yet — Canvas 2 hasn't started. Land on Analyse
+    // conv.complete but no draft yet — Phase 2 hasn't started. Land on Analyse
     // so the orchestrator's work-kickoff hook creates the draft.
     return {
       canvas: "analysis",
-      beat: "analyse",
+      step: "draft",
       status: "in_progress",
       driver: "ally",
       contentJson: { analysisId: input.latestAnalysisId },
     };
   }
 
-  // Fall back to Canvas 1.
+  // Fall back to Phase 1.
   if (!input.hasStatements) {
     return {
       canvas: "picture",
-      beat: "gather",
+      step: "gather",
       status: "not_started",
       driver: "person",
       contentJson: { statementIds: [] },
@@ -189,7 +189,7 @@ function deriveCurrentFromLegacy(input: {
   if (!input.hasBuildCompletedAt) {
     return {
       canvas: "picture",
-      beat: "gather",
+      step: "gather",
       status: "in_progress",
       driver: "person",
       contentJson: { statementIds: input.statementIds },
@@ -198,16 +198,16 @@ function deriveCurrentFromLegacy(input: {
   if (input.latestAnalysisId === null) {
     return {
       canvas: "picture",
-      beat: "analyse",
+      step: "draft",
       status: "in_progress",
       driver: "ally",
       contentJson: {},
     };
   }
-  // Canvas 1 Discuss — conversation active (conv.status !== complete).
+  // Phase 1 Discuss — conversation active (conv.status !== complete).
   return {
     canvas: "picture",
-    beat: "discuss",
+    step: "discuss",
     status: "in_progress",
     driver: "both",
     contentJson: { analysisId: input.latestAnalysisId },
@@ -217,7 +217,7 @@ function deriveCurrentFromLegacy(input: {
 // --- State transitions ----------------------------------------------------
 
 /**
- * Advance out of the current beat. Used when:
+ * Advance out of the current step. Used when:
  *   - Gather user clicks "That's all my docs"  → creates Analyse instance
  *   - Analyse finishes (called by the analyseStatements completion hook)
  *     → creates Discuss instance
@@ -235,10 +235,10 @@ export async function advanceSubStep(
     .limit(1);
   if (!current) throw new Error("sub-step not found");
 
-  const nextBeat = nextBeatAfter(current.beat as Beat);
-  if (!nextBeat) throw new Error(`no beat after ${current.beat}`);
+  const nextStep = nextStepAfter(current.step as Step);
+  if (!nextStep) throw new Error(`no step after ${current.step}`);
 
-  // Close the current beat (agreed).
+  // Close the current step (agreed).
   await db
     .update(subSteps)
     .set({ status: "agreed", agreedAt: new Date(), updatedAt: new Date() })
@@ -248,11 +248,11 @@ export async function advanceSubStep(
     .insert(subSteps)
     .values({
       userId,
-      canvasKey: current.canvasKey,
-      beat: nextBeat,
+      phaseKey: current.phaseKey,
+      step: nextStep,
       instance: current.instance,
       status: "in_progress",
-      driver: driverForBeat(current.canvasKey as Canvas, nextBeat),
+      driver: driverForStep(current.phaseKey as Phase, nextStep),
       contentJson: (options.contentJson ?? current.contentJson ?? null) as unknown as object,
       predecessorId: current.id,
     })
@@ -261,7 +261,7 @@ export async function advanceSubStep(
 }
 
 /**
- * End a Discuss beat: mark it agreed, create the Live instance. The ceremonial
+ * End a Discuss step: mark it agreed, create the Live instance. The ceremonial
  * close of the whole rhythm.
  */
 export async function agreeSubStep(userId: string, currentId: number): Promise<SubStep> {
@@ -271,7 +271,7 @@ export async function agreeSubStep(userId: string, currentId: number): Promise<S
     .where(and(eq(subSteps.id, currentId), eq(subSteps.userId, userId)))
     .limit(1);
   if (!current) throw new Error("sub-step not found");
-  if (current.beat !== "discuss") throw new Error("can only agree a discuss beat");
+  if (current.step !== "discuss") throw new Error("can only agree a discuss step");
 
   await db
     .update(subSteps)
@@ -282,8 +282,8 @@ export async function agreeSubStep(userId: string, currentId: number): Promise<S
     .insert(subSteps)
     .values({
       userId,
-      canvasKey: current.canvasKey,
-      beat: "live",
+      phaseKey: current.phaseKey,
+      step: "live",
       instance: current.instance,
       status: "in_progress",
       driver: "both",
@@ -295,7 +295,7 @@ export async function agreeSubStep(userId: string, currentId: number): Promise<S
 }
 
 /**
- * Reopen a Live beat: supersede the current Live, create a new Discuss
+ * Reopen a Live step: supersede the current Live, create a new Discuss
  * instance (instance+1). Downstream canvas cascade is deferred to Slice 2.
  */
 export async function reopenSubStep(userId: string, currentId: number): Promise<SubStep> {
@@ -305,7 +305,7 @@ export async function reopenSubStep(userId: string, currentId: number): Promise<
     .where(and(eq(subSteps.id, currentId), eq(subSteps.userId, userId)))
     .limit(1);
   if (!current) throw new Error("sub-step not found");
-  if (current.beat !== "live") throw new Error("can only reopen a live beat");
+  if (current.step !== "live") throw new Error("can only reopen a live step");
 
   await db
     .update(subSteps)
@@ -316,8 +316,8 @@ export async function reopenSubStep(userId: string, currentId: number): Promise<
     .insert(subSteps)
     .values({
       userId,
-      canvasKey: current.canvasKey,
-      beat: "discuss",
+      phaseKey: current.phaseKey,
+      step: "discuss",
       instance: current.instance + 1,
       status: "in_progress",
       driver: "both",
@@ -328,7 +328,7 @@ export async function reopenSubStep(userId: string, currentId: number): Promise<
   return discuss;
 }
 
-// --- Ally-at-work state transitions (Analyse beat only) -------------------
+// --- Ally-at-work state transitions (Analyse step only) -------------------
 
 export async function markAnalyseError(
   userId: string,
@@ -350,15 +350,15 @@ export async function clearAnalyseError(userId: string, subStepId: number): Prom
 
 // --- Utilities -------------------------------------------------------------
 
-function nextBeatAfter(beat: Beat): Beat | null {
-  if (beat === "gather") return "analyse";
-  if (beat === "analyse") return "discuss";
-  if (beat === "discuss") return "live";
+function nextStepAfter(step: Step): Step | null {
+  if (step === "gather") return "draft";
+  if (step === "draft") return "discuss";
+  if (step === "discuss") return "live";
   return null;
 }
 
-function driverForBeat(canvas: Canvas, beat: Beat): "person" | "ally" | "both" {
-  if (beat === "gather") return canvas === "picture" || canvas === "progress" ? "person" : "ally";
-  if (beat === "analyse") return "ally";
+function driverForStep(canvas: Phase, step: Step): "person" | "ally" | "both" {
+  if (step === "gather") return canvas === "picture" || canvas === "progress" ? "person" : "ally";
+  if (step === "draft") return "ally";
   return "both";
 }

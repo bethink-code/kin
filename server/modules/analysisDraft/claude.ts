@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { ZodTypeAny } from "zod";
 
-// Shared Claude client for the three Canvas 2 generation calls.
+// Shared Claude client for the three Phase 2 generation calls.
 // Matches the pattern in server/modules/analysis/analyse.ts but parameterised
 // because we run three structurally-identical calls per draft.
 

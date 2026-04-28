@@ -32,7 +32,7 @@ export const gapSchema = z.object({
 });
 
 // Annotation = a phrase in the prose that the user can click to see an
-// inline explanation. Same shape as Canvas 2's analysisProseSchema.
+// inline explanation. Same shape as Phase 2's analysisProseSchema.
 export const annotationSchema = z.object({
   kind: z.literal("explain"),
   phrase: z.string().describe("The exact phrase from the surrounding text that becomes clickable. Must appear verbatim in the text."),

@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { formatDateLong } from "@/lib/formatters";
-import type { BeatRelation, Beat } from "@/lib/beats";
+import type { StepRelation, Step } from "@/lib/steps";
 import type { Analysis, AnalysisDraft as AnalysisDraftRow } from "@shared/schema";
 
-// Landing card shown when the user clicks a beat tab/card. Always renders
+// Landing card shown when the user clicks a step tab/card. Always renders
 // for tab-click navigation; never for natural progression. Copy varies by
 // relation:
 //   past    — "YOU'RE LOOKING BACK · THIS BEAT IS DONE"
@@ -12,16 +12,16 @@ import type { Analysis, AnalysisDraft as AnalysisDraftRow } from "@shared/schema
 //   future  — "COMING UP — what this will be when you reach it"
 //
 // CTA varies too:
-//   past/current → "See / Carry on / Open it" → triggers BeatTransition
-//                  → beat content (peek mode for past, live mode for current)
+//   past/current → "See / Carry on / Open it" → triggers StepTransition
+//                  → step content (peek mode for past, live mode for current)
 //   future       → "Back to current →" → no transition; just dismisses
 
-type CanvasKey = "picture" | "analysis" | "plan" | "progress";
+type PhaseKey = "picture" | "analysis" | "plan" | "progress";
 
 const COPY: Record<
-  CanvasKey,
+  PhaseKey,
   Record<
-    Beat,
+    Step,
     {
       titles: { past: string; current: string; future: string };
       sub: { past: string; current: string; future: string };
@@ -45,7 +45,7 @@ const COPY: Record<
       },
       cta: { past: "See your statements →", current: "Continue uploading →" },
     },
-    analyse: {
+    draft: {
       titles: {
         past: "Your first take",
         current: "Reading your year",
@@ -97,7 +97,7 @@ const COPY: Record<
       },
       cta: { past: "Carry on →", current: "Carry on →" },
     },
-    analyse: {
+    draft: {
       titles: {
         past: "Your analysis",
         current: "Writing your analysis",
@@ -141,13 +141,13 @@ const COPY: Record<
   },
   plan: {
     gather: PLACEHOLDER("Pulled in"),
-    analyse: PLACEHOLDER("Drafting your plan"),
+    draft: PLACEHOLDER("Drafting your plan"),
     discuss: PLACEHOLDER("Shaping your plan"),
     live: PLACEHOLDER("Your agreed plan"),
   },
   progress: {
     gather: PLACEHOLDER("Check-in"),
-    analyse: PLACEHOLDER("Reading the delta"),
+    draft: PLACEHOLDER("Reading the delta"),
     discuss: PLACEHOLDER("Talking it through"),
     live: PLACEHOLDER("Where you stand"),
   },
@@ -163,27 +163,27 @@ function PLACEHOLDER(title: string) {
   };
 }
 
-const TAG: Record<BeatRelation, string> = {
+const TAG: Record<StepRelation, string> = {
   past: "YOU'RE LOOKING BACK · THIS BEAT IS DONE",
   current: "YOU'RE OPENING THIS",
   future: "COMING UP",
 };
 
-export function BeatLanding({
+export function StepController({
   canvas,
-  beat,
+  step,
   relation,
   isFirstEver,
   onCta,
   onBackToCurrent,
 }: {
-  canvas: CanvasKey;
-  beat: Beat;
-  relation: BeatRelation;
+  canvas: PhaseKey;
+  step: Step;
+  relation: StepRelation;
   /** True for the user's very first landing ever — drives the product
    *  orientation copy on the Gather card. */
   isFirstEver?: boolean;
-  /** Past + current — proceed into the content (via BeatTransition). */
+  /** Past + current — proceed into the content (via StepTransition). */
   onCta: () => void;
   /** Future or placeholder — dismiss without entering anything. */
   onBackToCurrent: () => void;
@@ -191,45 +191,45 @@ export function BeatLanding({
   // First-ever Gather gets the orientation card (what Kin is, no-advice
   // expectation, what we're going to build, why 12 months). Subsequent
   // visits to Gather get the routine summary.
-  if (isFirstEver && canvas === "picture" && beat === "gather" && relation === "current") {
+  if (isFirstEver && canvas === "picture" && step === "gather" && relation === "current") {
     return <FirstEverOrientation onCta={onCta} />;
   }
 
-  const copy = COPY[canvas][beat];
+  const copy = COPY[canvas][step];
   const title = copy.titles[relation];
   const sub = copy.sub[relation];
 
   // Surface completion stats only on past analyse + live.
   const analysisQ = useQuery<Analysis | null>({
     queryKey: ["/api/analysis/latest"],
-    enabled: canvas === "picture" && (beat === "analyse" || beat === "live") && relation !== "future",
+    enabled: canvas === "picture" && (step === "draft" || step === "live") && relation !== "future",
   });
   const draftQ = useQuery<AnalysisDraftRow | null>({
     queryKey: ["/api/analysis-draft/current"],
-    enabled: canvas === "analysis" && (beat === "analyse" || beat === "live") && relation !== "future",
+    enabled: canvas === "analysis" && (step === "draft" || step === "live") && relation !== "future",
   });
 
   let stampLabel: string | null = null;
   let stampValue: string | null = null;
-  if (canvas === "picture" && beat === "analyse" && relation !== "future") {
+  if (canvas === "picture" && step === "draft" && relation !== "future") {
     const at = analysisQ.data?.completedAt as unknown as string | undefined;
     if (at) {
       stampLabel = "Completed";
       stampValue = formatDateLong(at);
     }
-  } else if (canvas === "picture" && beat === "live" && relation === "current") {
+  } else if (canvas === "picture" && step === "live" && relation === "current") {
     const at = analysisQ.data?.completedAt as unknown as string | undefined;
     if (at) {
       stampLabel = "Agreed";
       stampValue = formatDateLong(at);
     }
-  } else if (canvas === "analysis" && beat === "analyse" && relation !== "future") {
+  } else if (canvas === "analysis" && step === "draft" && relation !== "future") {
     const at = draftQ.data?.generatedAt as unknown as string | undefined;
     if (at) {
       stampLabel = "Completed";
       stampValue = formatDateLong(at);
     }
-  } else if (canvas === "analysis" && beat === "live" && relation === "current") {
+  } else if (canvas === "analysis" && step === "live" && relation === "current") {
     const at = draftQ.data?.agreedAt as unknown as string | undefined;
     if (at) {
       stampLabel = "Agreed";
@@ -258,7 +258,7 @@ export function BeatLanding({
             </div>
           </div>
         )}
-        {beat === "live" && relation === "current" && copy.closed && (
+        {step === "live" && relation === "current" && copy.closed && (
           <p className="text-xs text-muted-foreground/85 leading-relaxed mb-6 italic">
             {copy.closed}
           </p>

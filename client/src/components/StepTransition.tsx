@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { StoryRotator } from "@/components/StoryRotator";
 
-// Brief transition shown between BeatLanding's CTA and the actual beat
+// Brief transition shown between StepController's CTA and the actual step
 // content. Reuses the same wait-state pattern (StoryRotator) Ally uses for
 // real work — keeps the visual language consistent. ~2.5s default; auto-
 // advances by calling onDone.
@@ -9,30 +9,30 @@ import { StoryRotator } from "@/components/StoryRotator";
 const TRANSITION_LINES: Record<string, Record<string, string>> = {
   picture: {
     gather: "Getting things ready…",
-    analyse: "Reading it back…",
+    draft: "Reading it back…",
     discuss: "Picking up where we left off…",
     live: "Opening the record…",
   },
   analysis: {
     gather: "Pulling it in…",
-    analyse: "Reading it back…",
+    draft: "Reading it back…",
     discuss: "Picking up where we left off…",
     live: "Opening the record…",
   },
 };
 
-export function BeatTransition({
+export function StepTransition({
   canvas,
-  beat,
+  step,
   durationMs = 2500,
   onDone,
 }: {
   canvas: "picture" | "analysis";
-  beat: "gather" | "analyse" | "discuss" | "live";
+  step: "gather" | "draft" | "discuss" | "live";
   durationMs?: number;
   onDone: () => void;
 }) {
-  const line = TRANSITION_LINES[canvas]?.[beat] ?? "One moment…";
+  const line = TRANSITION_LINES[canvas]?.[step] ?? "One moment…";
 
   useEffect(() => {
     const t = setTimeout(onDone, durationMs);

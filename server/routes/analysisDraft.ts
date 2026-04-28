@@ -289,7 +289,7 @@ router.post("/api/analysis-draft/:id/reopen", async (req, res) => {
   res.json({ ok: true });
 });
 
-// POST /api/analysis-draft/refresh — regenerate the Canvas 2 draft using
+// POST /api/analysis-draft/refresh — regenerate the Phase 2 draft using
 // the latest conversation profile + analysis chat notes. Used by:
 //   1. Manual "Refresh" button on the analysis artefact pane
 //   2. Auto-trigger from analysis_chat when action=request_regenerate

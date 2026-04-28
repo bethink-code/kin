@@ -82,7 +82,7 @@ const writeNoteBody = z.object({
   evidenceRefs: z.unknown().optional(),
   attributes: z.unknown().optional(),
   confidence: z.number().min(0).max(1).optional(),
-  sourceCanvas: z.string().optional(),
+  sourcePhase: z.string().optional(),
   sourceSubStepId: z.number().optional(),
   sourceMessageId: z.number().optional(),
   segmentIds: z.array(z.number()).optional(),

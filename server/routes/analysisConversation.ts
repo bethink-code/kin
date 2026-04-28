@@ -50,7 +50,7 @@ router.get("/api/analysis-conversation", async (req, res) => {
       userId: user.id,
       trigger: "session_resumed",
       canvas: "analysis",
-      payload: { canvas: "analysis", beat: "discuss" },
+      payload: { canvas: "analysis", step: "discuss" },
     });
   }
 

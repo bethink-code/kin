@@ -1,11 +1,11 @@
 // ============================================================================
 // Checklist derivation — given a sub-step, compute the agreement-gate
-// checklist for that beat. Pure-ish (reads from DB, no writes), called from
+// checklist for that step. Pure-ish (reads from DB, no writes), called from
 // the GET endpoint AND from the closer handler so what the user sees in the
 // gate modal is the same data the closer reads back.
 //
-// Canvas 1 Discuss: items = qa profile fields (the "what to gather" list).
-// Canvas 2 Discuss: simpler — one item per analysis section, covered when the
+// Phase 1 Discuss: items = qa profile fields (the "what to gather" list).
+// Phase 2 Discuss: simpler — one item per analysis section, covered when the
 //                   user has acknowledged it (chat engagement is the signal).
 // Other beats: no checklist (return empty).
 // ============================================================================
@@ -33,7 +33,7 @@ export type ChecklistItem = {
 
 export type Checklist = {
   canvas: string;
-  beat: string;
+  step: string;
   items: ChecklistItem[];
   agreementReady: boolean;
 };
@@ -62,17 +62,17 @@ export async function deriveChecklist(
   subStep: SubStep,
 ): Promise<Checklist> {
   // Only Discuss beats have a real checklist. Other beats return empty.
-  if (subStep.beat !== "discuss") {
-    return { canvas: subStep.canvasKey, beat: subStep.beat, items: [], agreementReady: true };
+  if (subStep.step !== "discuss") {
+    return { canvas: subStep.phaseKey, step: subStep.step, items: [], agreementReady: true };
   }
 
-  if (subStep.canvasKey === "picture") {
+  if (subStep.phaseKey === "picture") {
     return derivePictureChecklist(userId, subStep);
   }
-  if (subStep.canvasKey === "analysis") {
+  if (subStep.phaseKey === "analysis") {
     return deriveAnalysisChecklist(userId, subStep);
   }
-  return { canvas: subStep.canvasKey, beat: subStep.beat, items: [], agreementReady: true };
+  return { canvas: subStep.phaseKey, step: subStep.step, items: [], agreementReady: true };
 }
 
 async function derivePictureChecklist(
@@ -130,7 +130,7 @@ async function derivePictureChecklist(
     .filter((i) => i.importance === "core")
     .every((i) => i.status !== "pending");
 
-  return { canvas: "picture", beat: "discuss", items, agreementReady };
+  return { canvas: "picture", step: "discuss", items, agreementReady };
 }
 
 async function deriveAnalysisChecklist(
@@ -139,7 +139,7 @@ async function deriveAnalysisChecklist(
 ): Promise<Checklist> {
   const content = (subStep.contentJson ?? {}) as { draftId?: number };
   if (!content.draftId) {
-    return { canvas: "analysis", beat: "discuss", items: [], agreementReady: false };
+    return { canvas: "analysis", step: "discuss", items: [], agreementReady: false };
   }
 
   const [draft] = await db
@@ -148,7 +148,7 @@ async function deriveAnalysisChecklist(
     .where(eq(analysisDrafts.id, content.draftId))
     .limit(1);
   if (!draft) {
-    return { canvas: "analysis", beat: "discuss", items: [], agreementReady: false };
+    return { canvas: "analysis", step: "discuss", items: [], agreementReady: false };
   }
 
   // Items = sections of the prose. The user covers a section by either
@@ -206,7 +206,7 @@ async function deriveAnalysisChecklist(
   // If there are no sections (empty draft), allow agreement anyway — the gate
   // shouldn't block on derivation gaps.
   const agreementReady = items.length === 0 ? true : items.every((i) => i.status !== "pending");
-  return { canvas: "analysis", beat: "discuss", items, agreementReady };
+  return { canvas: "analysis", step: "discuss", items, agreementReady };
 }
 
 function humaniseSectionId(s: string): string {

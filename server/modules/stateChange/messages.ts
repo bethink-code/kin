@@ -20,11 +20,11 @@ import {
   analysisConversationMessages,
 } from "@shared/schema";
 
-type Canvas = "picture" | "analysis" | "plan" | "progress";
+type Phase = "picture" | "analysis" | "plan" | "progress";
 
 // --- Templates -------------------------------------------------------------
 
-export const OPENERS: Partial<Record<`${Canvas}_${string}`, string>> = {
+export const OPENERS: Partial<Record<`${Phase}_${string}`, string>> = {
   picture_live:
     "Done. That's your picture, agreed. I'll be here if anything changes — just shout.",
   analysis_live:
@@ -35,7 +35,7 @@ export const OPENERS: Partial<Record<`${Canvas}_${string}`, string>> = {
     "Pulling this back open. Tell me what we need to look at again.",
 };
 
-export const REOPENERS: Partial<Record<`${Canvas}_${string}`, string>> = {
+export const REOPENERS: Partial<Record<`${Phase}_${string}`, string>> = {
   picture_discuss:
     "Welcome back. We were in the middle of going through your picture — want to keep going from where we left off, or is there something else on your mind?",
   analysis_discuss:
@@ -87,7 +87,7 @@ export const TOPIC_STARTERS: Record<string, string> = {
  */
 export async function postAllyMessage(input: {
   userId: string;
-  canvas: Canvas;
+  canvas: Phase;
   content: string;
   isTransition?: boolean;
 }): Promise<number | null> {
@@ -139,7 +139,7 @@ export async function postAllyMessage(input: {
  */
 export async function latestMessageAt(
   userId: string,
-  canvas: Canvas,
+  canvas: Phase,
 ): Promise<Date | null> {
   if (canvas === "picture") {
     const [conv] = await db

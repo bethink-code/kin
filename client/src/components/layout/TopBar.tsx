@@ -1,18 +1,18 @@
 import { CanvasMenu } from "./CanvasMenu";
 import { UserMenu } from "./UserMenu";
-import type { CanvasKey } from "@/lib/canvasCopy";
+import type { PhaseKey } from "@/lib/canvasCopy";
 import type { AuthUser } from "@/hooks/useAuth";
 
 // Three zones in the top bar:
-//   [UserMenu]   [CanvasMenu pill — title | beat timeline]   [Ally wordmark]
+//   [UserMenu]   [CanvasMenu pill — title | step timeline]   [Ally wordmark]
 export function TopBar({
   user,
   activeCanvas,
   onNavigateSubStep,
 }: {
   user: AuthUser;
-  activeCanvas: CanvasKey;
-  onNavigateSubStep?: (canvas: CanvasKey, subStep: string) => void;
+  activeCanvas: PhaseKey;
+  onNavigateSubStep?: (canvas: PhaseKey, subStep: string) => void;
 }) {
   return (
     <header className="border-b border-border bg-background px-6 py-6 grid grid-cols-[1fr_auto_1fr] items-center gap-6 flex-shrink-0">
