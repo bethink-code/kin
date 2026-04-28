@@ -32,13 +32,13 @@ export type StateChangeKind =
   // corresponding handler being registered first.
   | (string & {});
 
-export type CanvasKey = "picture" | "analysis" | "plan" | "progress";
+export type PhaseKey = "picture" | "analysis" | "plan" | "progress";
 
 export type StateChangeContext = {
   userId: string;
   trigger: StateChangeKind;
   subStepId?: number | null;
-  canvas?: CanvasKey;
+  canvas?: PhaseKey;
   // Free-form payload; each handler reads what it cares about. Typed as
   // unknown deliberately — the handler narrows.
   payload?: unknown;

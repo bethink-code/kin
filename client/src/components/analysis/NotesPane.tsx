@@ -4,7 +4,7 @@ import { formatDate } from "@/lib/formatters";
 import type { RecordNote } from "@shared/schema";
 
 // Notes mode — the user's record of conversation. Available on every canvas,
-// every beat, all the time. Reads from /api/record/notes — the unified store.
+// every step, all the time. Reads from /api/record/notes — the unified store.
 //
 // "Notes" is the user-facing surface name; internally this is the record. See
 // Scratch/ally_architecture_spec.md and the slice 3 plan.
@@ -125,9 +125,9 @@ export function NotesPane({
                         {n.body}
                       </div>
                     )}
-                    {n.sourceCanvas && (
+                    {n.sourcePhase && (
                       <div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground/60">
-                        from · {n.sourceCanvas}
+                        from · {n.sourcePhase}
                       </div>
                     )}
                   </li>

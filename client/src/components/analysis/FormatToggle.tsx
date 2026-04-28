@@ -16,7 +16,7 @@ function write(format: Format): void {
   window.dispatchEvent(new CustomEvent("ally-format-change", { detail: format }));
 }
 
-// Shared format preference across all Canvas 2 readers. Persists to localStorage;
+// Shared format preference across all Phase 2 readers. Persists to localStorage;
 // the custom event syncs multiple component instances on the same page.
 export function useFormatPreference(): { format: Format; setFormat: (f: Format) => void } {
   const [format, setLocal] = useState<Format>(() => read());

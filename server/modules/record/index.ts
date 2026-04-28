@@ -45,7 +45,7 @@ export type WriteNoteInput = {
   attributes?: unknown;
   confidence?: number | null;
   sourceKind?: "ally_generated" | "user_stated" | "system_inferred" | "admin_set" | "imported";
-  sourceCanvas?: string | null;
+  sourcePhase?: string | null;
   sourceSubStepId?: number | null;
   sourceMessageId?: number | null;
   segmentIds?: number[]; // optional explicit linkage
@@ -57,7 +57,7 @@ export type EnsureSegmentInput = {
   label: string;
   description?: string | null;
   parentSegmentId?: number | null;
-  canvasKey?: string | null;
+  phaseKey?: string | null;
   subStepId?: number | null;
   topicKey?: string | null;
   attributes?: unknown;
@@ -111,7 +111,7 @@ export async function ensureRecord(userId: string): Promise<RecordRow> {
 }
 
 async function lazyBackfillFromLegacy(userId: string, recordId: number): Promise<void> {
-  // Canvas 1 conversation profile → notes
+  // Phase 1 conversation profile → notes
   const [conv] = await db
     .select()
     .from(conversations)
@@ -129,7 +129,7 @@ async function lazyBackfillFromLegacy(userId: string, recordId: number): Promise
         label: humanise(key),
         body: typeof value === "string" ? value : JSON.stringify(value),
         sourceKind: "ally_generated",
-        sourceCanvas: "picture",
+        sourcePhase: "picture",
         attributes: { migratedFrom: "conversations.profile" } as unknown as object,
       });
     }
@@ -143,13 +143,13 @@ async function lazyBackfillFromLegacy(userId: string, recordId: number): Promise
         label: text.slice(0, 80),
         body: text,
         sourceKind: "ally_generated",
-        sourceCanvas: "picture",
+        sourcePhase: "picture",
         attributes: { migratedFrom: "conversations.flaggedIssues" } as unknown as object,
       });
     }
   }
 
-  // Canvas 2 claims (kind=note) → notes; kind=explain → notes with kind=observation.
+  // Phase 2 claims (kind=note) → notes; kind=explain → notes with kind=observation.
   const [draft] = await db
     .select()
     .from(analysisDrafts)
@@ -171,7 +171,7 @@ async function lazyBackfillFromLegacy(userId: string, recordId: number): Promise
         body: c.body,
         evidenceRefs: c.evidenceRefs,
         sourceKind: "ally_generated",
-        sourceCanvas: "analysis",
+        sourcePhase: "analysis",
         attributes: { migratedFrom: "analysis_claims", anchorId: c.anchorId } as unknown as object,
       });
     }
@@ -198,7 +198,7 @@ export async function writeNote(input: WriteNoteInput): Promise<RecordNote> {
       attributes: input.attributes as unknown as object,
       confidence: input.confidence != null ? String(input.confidence) : null,
       sourceKind: input.sourceKind ?? "ally_generated",
-      sourceCanvas: input.sourceCanvas ?? null,
+      sourcePhase: input.sourcePhase ?? null,
       sourceSubStepId: input.sourceSubStepId ?? null,
       sourceMessageId: input.sourceMessageId ?? null,
     })
@@ -259,8 +259,8 @@ export async function ensureSegment(input: EnsureSegmentInput): Promise<RecordSe
         eq(recordSegments.kind, input.kind),
         input.subStepId != null
           ? eq(recordSegments.subStepId, input.subStepId)
-          : input.canvasKey != null
-            ? and(eq(recordSegments.canvasKey, input.canvasKey), isNull(recordSegments.subStepId))
+          : input.phaseKey != null
+            ? and(eq(recordSegments.phaseKey, input.phaseKey), isNull(recordSegments.subStepId))
             : input.topicKey != null
               ? eq(recordSegments.topicKey, input.topicKey)
               : eq(recordSegments.label, input.label),
@@ -278,7 +278,7 @@ export async function ensureSegment(input: EnsureSegmentInput): Promise<RecordSe
       parentSegmentId: input.parentSegmentId ?? null,
       label: input.label,
       description: input.description ?? null,
-      canvasKey: input.canvasKey ?? null,
+      phaseKey: input.phaseKey ?? null,
       subStepId: input.subStepId ?? null,
       topicKey: input.topicKey ?? null,
       attributes: input.attributes as unknown as object,

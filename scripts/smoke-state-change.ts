@@ -88,8 +88,8 @@ async function main() {
   if (rec1.id !== rec2.id) throw new Error("ensureRecord created two records");
   console.log(`re-call same record id ${rec2.id} ✓`);
 
-  // --- chat_turn_taken (Canvas 1) ----------------------------------------
-  step("chat_turn_taken (Canvas 1 picture)");
+  // --- chat_turn_taken (Phase 1) ----------------------------------------
+  step("chat_turn_taken (Phase 1 picture)");
   const before1 = await noteCount();
   await onStateChange({
     userId,
@@ -111,8 +111,8 @@ async function main() {
   console.log(`notes: ${before1} → ${after1} (expected +4: retirement, debt, goal, flag)`);
   if (after1 - before1 !== 4) throw new Error(`expected +4 notes, got +${after1 - before1}`);
 
-  // --- chat_turn_taken (Canvas 2) ----------------------------------------
-  step("chat_turn_taken (Canvas 2 analysis)");
+  // --- chat_turn_taken (Phase 2) ----------------------------------------
+  step("chat_turn_taken (Phase 2 analysis)");
   const before2 = await noteCount();
   await onStateChange({
     userId,
@@ -159,7 +159,7 @@ async function main() {
   if (after4 - before4 !== 1) throw new Error(`expected +1, got +${after4 - before4}`);
 
   // --- Build a Discuss sub-step + conversations so opener handlers can post.
-  step("Seed Canvas 1 conversation + Discuss sub-step (so openers can post)");
+  step("Seed Phase 1 conversation + Discuss sub-step (so openers can post)");
   // Insert a fake analyses row so the conversation has something to point at.
   const [fakeAnalysis] = await db
     .insert(analyses)
@@ -192,8 +192,8 @@ async function main() {
     .insert(subSteps)
     .values({
       userId,
-      canvasKey: "picture",
-      beat: "discuss",
+      phaseKey: "picture",
+      step: "discuss",
       instance: 1,
       status: "in_progress",
       driver: "both",
@@ -219,7 +219,7 @@ async function main() {
   const afterMsg = await picMsgCount();
   const afterNotes = await noteCount();
   const afterJobs = (await db.select().from(recordSynthesisJobs).where(eq(recordSynthesisJobs.userId, userId))).length;
-  console.log(`live sub-step beat=${live.beat} status=${live.status}`);
+  console.log(`live sub-step step=${live.step} status=${live.status}`);
   console.log(`messages: ${beforeMsg} → ${afterMsg} (expected +1: Live opener)`);
   console.log(`notes: ${beforeNotes} → ${afterNotes} (expected +1: agreement decision)`);
   console.log(`synthesis jobs: ${beforeJobs} → ${afterJobs} (expected +1)`);
@@ -242,7 +242,7 @@ async function main() {
   });
   const afterMsg2 = await picMsgCount();
   const afterNotes2 = await noteCount();
-  console.log(`new discuss sub-step beat=${newDiscuss.beat} instance=${newDiscuss.instance}`);
+  console.log(`new discuss sub-step step=${newDiscuss.step} instance=${newDiscuss.instance}`);
   console.log(`messages: ${beforeMsg2} → ${afterMsg2} (expected +1: Re-Discuss opener)`);
   console.log(`notes: ${beforeNotes2} → ${afterNotes2} (expected +1: reopen decision)`);
   if (afterMsg2 - beforeMsg2 !== 1) throw new Error(`expected +1 msg, got +${afterMsg2 - beforeMsg2}`);
@@ -255,7 +255,7 @@ async function main() {
     userId,
     trigger: "session_resumed",
     canvas: "picture",
-    payload: { canvas: "picture", beat: "discuss" },
+    payload: { canvas: "picture", step: "discuss" },
   });
   const afterMsg3 = await picMsgCount();
   console.log(`messages: ${beforeMsg3} → ${afterMsg3} (expected +1: re-opener)`);
@@ -267,7 +267,7 @@ async function main() {
   console.log(`record_notes: ${allNotes.length}`);
   for (const n of allNotes) {
     const cat = n.category ? `[${n.category}]` : "";
-    const can = n.sourceCanvas ? `(${n.sourceCanvas})` : "";
+    const can = n.sourcePhase ? `(${n.sourcePhase})` : "";
     console.log(`  ${n.kind.padEnd(11)} ${cat.padEnd(15)} ${n.label} ${can}`);
   }
 

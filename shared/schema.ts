@@ -68,8 +68,8 @@ export const auditLogs = pgTable("audit_logs", {
 // Exactly one active row per promptKey.
 export const systemPrompts = pgTable("system_prompts", {
   id: serial("id").primaryKey(),
-  // Canvas 1: extraction | analysis | qa | qa_bring_it_in
-  // Canvas 2: analysis_facts | analysis_prose | analysis_panels | analysis_chat
+  // Phase 1: extraction | analysis | qa | qa_bring_it_in
+  // Phase 2: analysis_facts | analysis_prose | analysis_panels | analysis_chat
   promptKey: text("prompt_key").notNull(),
   label: text("label").notNull(),
   description: text("description"),
@@ -155,15 +155,15 @@ export const conversationMessages = pgTable(
   (t) => [index("idx_conversation_messages_conversation_id").on(t.conversationId)]
 );
 
-// === Canvas 2 — Our analysis ===
-// The first-draft analysis Ally produces from everything known after Canvas 1.
+// === Phase 2 — Our analysis ===
+// The first-draft analysis Ally produces from everything known after Phase 1.
 // One row per generation. Supersedes on user disagreement; agreed on sign-off.
 export const analysisDrafts = pgTable(
   "analysis_drafts",
   {
     id: serial("id").primaryKey(),
     userId: text("user_id").notNull().references(() => users.id),
-    // Which Canvas 1 outputs this draft was built from. Kept for audit and for
+    // Which Phase 1 outputs this draft was built from. Kept for audit and for
     // reasoning about whether a stale draft needs regenerating.
     sourceConversationId: integer("source_conversation_id").references(() => conversations.id),
     sourceAnalysisId: integer("source_analysis_id").references(() => analyses.id),
@@ -194,8 +194,8 @@ export const analysisClaims = pgTable(
   "analysis_claims",
   {
     id: serial("id").primaryKey(),
-    // Polymorphic ownership: a claim belongs to either a Canvas 2 draft OR
-    // a Canvas 1 analysis. App-level invariant: exactly one of (draftId,
+    // Polymorphic ownership: a claim belongs to either a Phase 2 draft OR
+    // a Phase 1 analysis. App-level invariant: exactly one of (draftId,
     // analysisId) is non-null. Keeping both nullable avoids forcing Drizzle
     // through a CHECK constraint migration.
     draftId: integer("draft_id").references(() => analysisDrafts.id),
@@ -214,7 +214,7 @@ export const analysisClaims = pgTable(
 );
 
 // The refining conversation that happens alongside the draft. Separate from the
-// Canvas 1 `conversations` table — each baseline cycle starts a fresh conversation
+// Phase 1 `conversations` table — each baseline cycle starts a fresh conversation
 // (PRD §8: "can scroll back through the chat but can't add to it. Changes require a
 // new conversation.").
 export const analysisConversations = pgTable(
@@ -224,8 +224,8 @@ export const analysisConversations = pgTable(
     userId: text("user_id").notNull().references(() => users.id),
     draftId: integer("draft_id").notNull().references(() => analysisDrafts.id),
     status: text("status").notNull().default("active"), // active | paused | complete
-    // Augmentations established during refining — may add or override Canvas 1 facts
-    // without rewriting the Canvas 1 conversation.profile.
+    // Augmentations established during refining — may add or override Phase 1 facts
+    // without rewriting the Phase 1 conversation.profile.
     profile: jsonb("profile"),
     startedAt: timestamp("started_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -275,14 +275,14 @@ export const subSteps = pgTable(
   {
     id: serial("id").primaryKey(),
     userId: text("user_id").notNull().references(() => users.id),
-    canvasKey: text("canvas_key").notNull(), // picture | analysis | plan | progress
-    beat: text("beat").notNull(), // gather | analyse | discuss | live
+    phaseKey: text("phase_key").notNull(), // picture | analysis | plan | progress
+    step: text("step").notNull(), // gather | draft | discuss | live
     instance: integer("instance").notNull().default(1), // re-entry counter
     status: text("status").notNull().default("not_started"), // not_started | in_progress | agreed | superseded | paused
     driver: text("driver").notNull(), // person | ally | both
-    // Canvas × beat specific artefact payload.
+    // Phase × step specific artefact payload.
     // - picture.gather:  { statementIds: number[] }
-    // - picture.analyse: { analysisId: number }   → references `analyses` row
+    // - picture.draft:   { analysisId: number }   → references `analyses` row
     // - picture.discuss: { analysisId: number }   → same reference, conversation derives
     // - picture.live:    { analysisId: number }
     contentJson: jsonb("content_json"),
@@ -292,8 +292,8 @@ export const subSteps = pgTable(
     attachmentsJson: jsonb("attachments_json"),
     // Structured facts established during this sub-step — feeds the record of discussion.
     notesJson: jsonb("notes_json"),
-    // Ally-at-work error state. Only set while status='in_progress' and beat='analyse'
-    // and the Analyse sub-mode is 'hit_problem' (derived; see server/modules/subStep).
+    // Ally-at-work error state. Only set while status='in_progress' and step='draft'
+    // and the Draft sub-mode is 'hit_problem' (derived; see server/modules/subStep).
     errorMessage: text("error_message"),
     predecessorId: integer("predecessor_id"), // self-fk, for re-entry chaining
     startedAt: timestamp("started_at").notNull().defaultNow(),
@@ -304,7 +304,7 @@ export const subSteps = pgTable(
   },
   (t) => [
     index("idx_sub_steps_user").on(t.userId),
-    index("idx_sub_steps_user_canvas").on(t.userId, t.canvasKey),
+    index("idx_sub_steps_user_phase").on(t.userId, t.phaseKey),
   ],
 );
 
@@ -375,7 +375,7 @@ export const recordSegments = pgTable(
     summaryJson: jsonb("summary_json"),
     attributes: jsonb("attributes"),
     // Provenance hooks per kind (any may apply).
-    canvasKey: text("canvas_key"),
+    phaseKey: text("phase_key"),
     subStepId: integer("sub_step_id").references(() => subSteps.id),
     topicKey: text("topic_key"),
     startedAt: timestamp("started_at").notNull().defaultNow(),
@@ -415,7 +415,7 @@ export const recordNotes = pgTable(
     // ally_generated | user_stated | system_inferred | admin_set | imported
     sourceKind: text("source_kind"),
     // Origin provenance.
-    sourceCanvas: text("source_canvas"),
+    sourcePhase: text("source_phase"),
     sourceSubStepId: integer("source_sub_step_id").references(() => subSteps.id),
     sourceMessageId: integer("source_message_id").references(() => subStepMessages.id),
     // Audit chain (status flag covers POPIA deletion intent — UI hides

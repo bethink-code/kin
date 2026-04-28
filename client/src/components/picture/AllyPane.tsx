@@ -7,7 +7,7 @@ import { AllyQuips } from "./AllyQuips";
 import { ConversationInput } from "@/components/conversation/ConversationInput";
 import { ExplainPane } from "@/components/analysis/ExplainPane";
 import { NotesPane } from "@/components/analysis/NotesPane";
-import type { CanvasKey } from "@/lib/canvasCopy";
+import type { PhaseKey } from "@/lib/canvasCopy";
 import type { AnalysisDraft as AnalysisDraftRow } from "@shared/schema";
 
 type Mode = "chat" | "explain" | "notes";
@@ -25,11 +25,11 @@ const stateLineByMode: Record<Mode, { label: string; tone: string }> = {
 //   - the pill switcher in the header
 //   - external annotation clicks via window event "ally-pane-mode" with
 //     { detail: { mode, anchorId } } — fired from AnnotatedText on the left.
-export function AllyPane({ canvas = "picture" }: { canvas?: CanvasKey }) {
+export function AllyPane({ canvas = "picture" }: { canvas?: PhaseKey }) {
   const [mode, setMode] = useState<Mode>("chat");
   const [anchorId, setAnchorId] = useState<string | null>(null);
 
-  // Canvas 2 chat auto-starts only once the draft is ready. During the thinking
+  // Phase 2 chat auto-starts only once the draft is ready. During the thinking
   // phase we render a quiet holding-space message instead of trying to /start
   // (which would error with no_ready_draft).
   const draftQ = useQuery<AnalysisDraftRow | null>({
@@ -95,7 +95,7 @@ export function AllyPane({ canvas = "picture" }: { canvas?: CanvasKey }) {
   );
 }
 
-// Shown during Canvas 2 `thinking` — Ally holds the space while the draft is
+// Shown during Phase 2 `thinking` — Ally holds the space while the draft is
 // generating. Visibly active (pulsing dots) and voiced (rotating quips) so the
 // person feels her presence, not just a static message.
 function ChatHoldingSpace() {

@@ -110,8 +110,8 @@ var auditLogs = pgTable("audit_logs", {
 });
 var systemPrompts = pgTable("system_prompts", {
   id: serial("id").primaryKey(),
-  // Canvas 1: extraction | analysis | qa | qa_bring_it_in
-  // Canvas 2: analysis_facts | analysis_prose | analysis_panels | analysis_chat
+  // Phase 1: extraction | analysis | qa | qa_bring_it_in
+  // Phase 2: analysis_facts | analysis_prose | analysis_panels | analysis_chat
   promptKey: text("prompt_key").notNull(),
   label: text("label").notNull(),
   description: text("description"),
@@ -201,7 +201,7 @@ var analysisDrafts = pgTable(
   {
     id: serial("id").primaryKey(),
     userId: text("user_id").notNull().references(() => users.id),
-    // Which Canvas 1 outputs this draft was built from. Kept for audit and for
+    // Which Phase 1 outputs this draft was built from. Kept for audit and for
     // reasoning about whether a stale draft needs regenerating.
     sourceConversationId: integer("source_conversation_id").references(() => conversations.id),
     sourceAnalysisId: integer("source_analysis_id").references(() => analyses.id),
@@ -233,8 +233,8 @@ var analysisClaims = pgTable(
   "analysis_claims",
   {
     id: serial("id").primaryKey(),
-    // Polymorphic ownership: a claim belongs to either a Canvas 2 draft OR
-    // a Canvas 1 analysis. App-level invariant: exactly one of (draftId,
+    // Polymorphic ownership: a claim belongs to either a Phase 2 draft OR
+    // a Phase 1 analysis. App-level invariant: exactly one of (draftId,
     // analysisId) is non-null. Keeping both nullable avoids forcing Drizzle
     // through a CHECK constraint migration.
     draftId: integer("draft_id").references(() => analysisDrafts.id),
@@ -265,8 +265,8 @@ var analysisConversations = pgTable(
     draftId: integer("draft_id").notNull().references(() => analysisDrafts.id),
     status: text("status").notNull().default("active"),
     // active | paused | complete
-    // Augmentations established during refining — may add or override Canvas 1 facts
-    // without rewriting the Canvas 1 conversation.profile.
+    // Augmentations established during refining — may add or override Phase 1 facts
+    // without rewriting the Phase 1 conversation.profile.
     profile: jsonb("profile"),
     startedAt: timestamp("started_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -305,19 +305,19 @@ var subSteps = pgTable(
   {
     id: serial("id").primaryKey(),
     userId: text("user_id").notNull().references(() => users.id),
-    canvasKey: text("canvas_key").notNull(),
+    phaseKey: text("phase_key").notNull(),
     // picture | analysis | plan | progress
-    beat: text("beat").notNull(),
-    // gather | analyse | discuss | live
+    step: text("step").notNull(),
+    // gather | draft | discuss | live
     instance: integer("instance").notNull().default(1),
     // re-entry counter
     status: text("status").notNull().default("not_started"),
     // not_started | in_progress | agreed | superseded | paused
     driver: text("driver").notNull(),
     // person | ally | both
-    // Canvas × beat specific artefact payload.
+    // Phase × step specific artefact payload.
     // - picture.gather:  { statementIds: number[] }
-    // - picture.analyse: { analysisId: number }   → references `analyses` row
+    // - picture.draft:   { analysisId: number }   → references `analyses` row
     // - picture.discuss: { analysisId: number }   → same reference, conversation derives
     // - picture.live:    { analysisId: number }
     contentJson: jsonb("content_json"),
@@ -327,8 +327,8 @@ var subSteps = pgTable(
     attachmentsJson: jsonb("attachments_json"),
     // Structured facts established during this sub-step — feeds the record of discussion.
     notesJson: jsonb("notes_json"),
-    // Ally-at-work error state. Only set while status='in_progress' and beat='analyse'
-    // and the Analyse sub-mode is 'hit_problem' (derived; see server/modules/subStep).
+    // Ally-at-work error state. Only set while status='in_progress' and step='draft'
+    // and the Draft sub-mode is 'hit_problem' (derived; see server/modules/subStep).
     errorMessage: text("error_message"),
     predecessorId: integer("predecessor_id"),
     // self-fk, for re-entry chaining
@@ -340,7 +340,7 @@ var subSteps = pgTable(
   },
   (t) => [
     index("idx_sub_steps_user").on(t.userId),
-    index("idx_sub_steps_user_canvas").on(t.userId, t.canvasKey)
+    index("idx_sub_steps_user_phase").on(t.userId, t.phaseKey)
   ]
 );
 var subStepMessages = pgTable(
@@ -391,7 +391,7 @@ var recordSegments = pgTable(
     summaryJson: jsonb("summary_json"),
     attributes: jsonb("attributes"),
     // Provenance hooks per kind (any may apply).
-    canvasKey: text("canvas_key"),
+    phaseKey: text("phase_key"),
     subStepId: integer("sub_step_id").references(() => subSteps.id),
     topicKey: text("topic_key"),
     startedAt: timestamp("started_at").notNull().defaultNow(),
@@ -428,7 +428,7 @@ var recordNotes = pgTable(
     // ally_generated | user_stated | system_inferred | admin_set | imported
     sourceKind: text("source_kind"),
     // Origin provenance.
-    sourceCanvas: text("source_canvas"),
+    sourcePhase: text("source_phase"),
     sourceSubStepId: integer("source_sub_step_id").references(() => subSteps.id),
     sourceMessageId: integer("source_message_id").references(() => subStepMessages.id),
     // Audit chain (status flag covers POPIA deletion intent — UI hides
@@ -1253,7 +1253,7 @@ async function refreshCanvas1Analysis(userId) {
       }).where(
         and4(
           eq7(subSteps.userId, userId),
-          eq7(subSteps.canvasKey, "picture"),
+          eq7(subSteps.phaseKey, "picture"),
           isNull(subSteps.supersededAt)
         )
       );
@@ -1647,7 +1647,7 @@ async function lazyBackfillFromLegacy(userId, recordId) {
         label: humanise(key),
         body: typeof value === "string" ? value : JSON.stringify(value),
         sourceKind: "ally_generated",
-        sourceCanvas: "picture",
+        sourcePhase: "picture",
         attributes: { migratedFrom: "conversations.profile" }
       });
     }
@@ -1661,7 +1661,7 @@ async function lazyBackfillFromLegacy(userId, recordId) {
         label: text2.slice(0, 80),
         body: text2,
         sourceKind: "ally_generated",
-        sourceCanvas: "picture",
+        sourcePhase: "picture",
         attributes: { migratedFrom: "conversations.flaggedIssues" }
       });
     }
@@ -1679,7 +1679,7 @@ async function lazyBackfillFromLegacy(userId, recordId) {
         body: c.body,
         evidenceRefs: c.evidenceRefs,
         sourceKind: "ally_generated",
-        sourceCanvas: "analysis",
+        sourcePhase: "analysis",
         attributes: { migratedFrom: "analysis_claims", anchorId: c.anchorId }
       });
     }
@@ -1699,7 +1699,7 @@ async function writeNote(input) {
     attributes: input.attributes,
     confidence: input.confidence != null ? String(input.confidence) : null,
     sourceKind: input.sourceKind ?? "ally_generated",
-    sourceCanvas: input.sourceCanvas ?? null,
+    sourcePhase: input.sourcePhase ?? null,
     sourceSubStepId: input.sourceSubStepId ?? null,
     sourceMessageId: input.sourceMessageId ?? null
   }).returning();
@@ -1783,16 +1783,16 @@ var PICTURE_FIELDS = [
   { key: "goals", label: "Goals", importance: "core" }
 ];
 async function deriveChecklist(userId, subStep) {
-  if (subStep.beat !== "discuss") {
-    return { canvas: subStep.canvasKey, beat: subStep.beat, items: [], agreementReady: true };
+  if (subStep.step !== "discuss") {
+    return { canvas: subStep.phaseKey, step: subStep.step, items: [], agreementReady: true };
   }
-  if (subStep.canvasKey === "picture") {
+  if (subStep.phaseKey === "picture") {
     return derivePictureChecklist(userId, subStep);
   }
-  if (subStep.canvasKey === "analysis") {
+  if (subStep.phaseKey === "analysis") {
     return deriveAnalysisChecklist(userId, subStep);
   }
-  return { canvas: subStep.canvasKey, beat: subStep.beat, items: [], agreementReady: true };
+  return { canvas: subStep.phaseKey, step: subStep.step, items: [], agreementReady: true };
 }
 async function derivePictureChecklist(userId, subStep) {
   const [conv] = await db.select().from(conversations).where(eq10(conversations.userId, userId)).limit(1);
@@ -1827,16 +1827,16 @@ async function derivePictureChecklist(userId, subStep) {
     return { key, label, status: "pending", importance };
   });
   const agreementReady = items.filter((i) => i.importance === "core").every((i) => i.status !== "pending");
-  return { canvas: "picture", beat: "discuss", items, agreementReady };
+  return { canvas: "picture", step: "discuss", items, agreementReady };
 }
 async function deriveAnalysisChecklist(userId, subStep) {
   const content = subStep.contentJson ?? {};
   if (!content.draftId) {
-    return { canvas: "analysis", beat: "discuss", items: [], agreementReady: false };
+    return { canvas: "analysis", step: "discuss", items: [], agreementReady: false };
   }
   const [draft] = await db.select().from(analysisDrafts).where(eq10(analysisDrafts.id, content.draftId)).limit(1);
   if (!draft) {
-    return { canvas: "analysis", beat: "discuss", items: [], agreementReady: false };
+    return { canvas: "analysis", step: "discuss", items: [], agreementReady: false };
   }
   const prose = draft.prose ?? {};
   const sections = prose.sections ?? [];
@@ -1866,7 +1866,7 @@ async function deriveAnalysisChecklist(userId, subStep) {
     };
   });
   const agreementReady = items.length === 0 ? true : items.every((i) => i.status !== "pending");
-  return { canvas: "analysis", beat: "discuss", items, agreementReady };
+  return { canvas: "analysis", step: "discuss", items, agreementReady };
 }
 function humaniseSectionId(s) {
   return s.replace(/[_-]/g, " ").replace(/^./, (c) => c.toUpperCase());
@@ -1947,7 +1947,7 @@ async function writeNotesFromTurn(ctx) {
         label,
         body,
         sourceKind: "ally_generated",
-        sourceCanvas: "picture",
+        sourcePhase: "picture",
         sourceSubStepId: p.sourceSubStepId ?? ctx.subStepId ?? null,
         sourceMessageId: p.sourceMessageId ?? null,
         attributes: {
@@ -1964,7 +1964,7 @@ async function writeNotesFromTurn(ctx) {
         label: flag.length > 80 ? flag.slice(0, 77) + "..." : flag,
         body: flag,
         sourceKind: "ally_generated",
-        sourceCanvas: "picture",
+        sourcePhase: "picture",
         sourceSubStepId: p.sourceSubStepId ?? ctx.subStepId ?? null,
         sourceMessageId: p.sourceMessageId ?? null,
         attributes: {
@@ -1985,7 +1985,7 @@ async function writeNotesFromTurn(ctx) {
         body: n.body,
         evidenceRefs: n.evidenceRefs,
         sourceKind: "ally_generated",
-        sourceCanvas: "analysis",
+        sourcePhase: "analysis",
         sourceSubStepId: p.sourceSubStepId ?? ctx.subStepId ?? null,
         sourceMessageId: p.sourceMessageId ?? null,
         attributes: {
@@ -2007,7 +2007,7 @@ async function writeAnalyseSynthesisNote(ctx) {
     label,
     body,
     sourceKind: "ally_generated",
-    sourceCanvas: canvas,
+    sourcePhase: canvas,
     sourceSubStepId: ctx.subStepId ?? null,
     attributes: {
       analysisId: p.analysisId ?? null,
@@ -2026,7 +2026,7 @@ async function writeAgreementDecision(ctx) {
     label,
     body: p.summary ?? null,
     sourceKind: "user_stated",
-    sourceCanvas: canvas,
+    sourcePhase: canvas,
     sourceSubStepId: ctx.subStepId ?? null,
     attributes: {
       analysisId: p.analysisId ?? null,
@@ -2051,7 +2051,7 @@ async function writeReopenDecision(ctx) {
     label,
     body: p.reason ?? null,
     sourceKind: "user_stated",
-    sourceCanvas: canvas,
+    sourcePhase: canvas,
     sourceSubStepId: ctx.subStepId ?? null
   });
 }
@@ -2066,7 +2066,7 @@ async function writeAdvanceMarker(ctx) {
     label: "Said that's all my docs",
     body: p.statementCount != null ? `Closed Gather with ${p.statementCount} statement${p.statementCount === 1 ? "" : "s"}.` : null,
     sourceKind: "user_stated",
-    sourceCanvas: "picture",
+    sourcePhase: "picture",
     sourceSubStepId: ctx.subStepId ?? null
   });
 }
@@ -2112,9 +2112,9 @@ async function postReopenOpener(ctx) {
 }
 async function postSessionReopener(ctx) {
   const canvas = ctx.canvas ?? "picture";
-  const beat = ctx.payload?.beat ?? "discuss";
-  if (beat !== "discuss") return;
-  const content = REOPENERS[`${canvas}_${beat}`];
+  const step = ctx.payload?.step ?? "discuss";
+  if (step !== "discuss") return;
+  const content = REOPENERS[`${canvas}_${step}`];
   if (!content) return;
   await postAllyMessage({ userId: ctx.userId, canvas, content });
 }
@@ -2342,7 +2342,7 @@ router6.get("/api/qa/conversation", async (req, res) => {
       userId: user.id,
       trigger: "session_resumed",
       canvas: "picture",
-      payload: { canvas: "picture", beat: "discuss" }
+      payload: { canvas: "picture", step: "discuss" }
     });
   }
   const [refreshed] = await db.select().from(conversations).where(eq14(conversations.id, conversation.id)).limit(1);
@@ -2654,7 +2654,7 @@ var proportionSchema = z7.object({
   }))
 });
 var panelBeatSchema = z7.object({
-  id: z7.string().describe("Stable id, e.g. 'income_shape', 'bond_weight'. Matches facts section ids when the beat is tied to one."),
+  id: z7.string().describe("Stable id, e.g. 'income_shape', 'bond_weight'. Matches facts section ids when the step is tied to one."),
   anchorCopy: z7.string().describe("ONE short sentence \u2014 the line of text under/beside the panel illustration. Under ~90 chars."),
   metaphor: z7.enum([
     "tap_and_basin",
@@ -2670,12 +2670,12 @@ var panelBeatSchema = z7.object({
     "open_door",
     "stacked_stones",
     "none"
-  ]).describe("The visual metaphor to use. 'none' = copy-only beat (opener or beat of silence). Extend the enum only when a new metaphor is earned."),
+  ]).describe("The visual metaphor to use. 'none' = copy-only step (opener or step of silence). Extend the enum only when a new metaphor is earned."),
   proportion: proportionSchema.optional().describe("Optional proportional visual (e.g., income vs commitments). Rendered deterministically."),
   annotations: z7.array(annotationSchema2).default([])
 });
 var analysisPanelsSchema = z7.object({
-  beats: z7.array(panelBeatSchema).describe("Ordered top-to-bottom. The first beat IS the opening recognition."),
+  beats: z7.array(panelBeatSchema).describe("Ordered top-to-bottom. The first step IS the opening recognition."),
   explainClaims: z7.array(z7.object({
     anchorId: z7.string(),
     label: z7.string(),
@@ -2724,14 +2724,14 @@ async function generateFacts(input) {
 }
 function buildUserMessage2(input) {
   return [
-    "# Canvas 1 outputs \u2014 produce the structured facts for Canvas 2.",
+    "# Phase 1 outputs \u2014 produce the structured facts for Phase 2.",
     "",
     "## Statements (summary)",
     "```json",
     JSON.stringify(input.statementSummaries, null, 2),
     "```",
     "",
-    "## First-take analysis (from Canvas 1)",
+    "## First-take analysis (from Phase 1)",
     "```json",
     JSON.stringify(input.firstTakeAnalysis, null, 2),
     "```",
@@ -2835,8 +2835,8 @@ function extractClaims(prose, panels, facts) {
       }
     }
   }
-  for (const beat of panels.beats) {
-    for (const ann of beat.annotations ?? []) {
+  for (const step of panels.beats) {
+    for (const ann of step.annotations ?? []) {
       addAnnotation(seen, ann, prose, panels, facts);
     }
   }
@@ -3224,7 +3224,7 @@ router8.get("/api/analysis-conversation", async (req, res) => {
       userId: user.id,
       trigger: "session_resumed",
       canvas: "analysis",
-      payload: { canvas: "analysis", beat: "discuss" }
+      payload: { canvas: "analysis", step: "discuss" }
     });
   }
   const messages = await loadMessages2(conv.id);
@@ -3446,8 +3446,8 @@ async function lazyBackfill(userId) {
   });
   const [created] = await db.insert(subSteps).values({
     userId,
-    canvasKey: derived.canvas,
-    beat: derived.beat,
+    phaseKey: derived.canvas,
+    step: derived.step,
     instance: 1,
     status: derived.status,
     driver: derived.driver,
@@ -3460,7 +3460,7 @@ function deriveCurrentFromLegacy(input) {
     if (input.latestDraftStatus === "agreed") {
       return {
         canvas: "analysis",
-        beat: "live",
+        step: "live",
         status: "in_progress",
         driver: "both",
         contentJson: { draftId: input.latestDraftId, analysisId: input.latestAnalysisId }
@@ -3469,7 +3469,7 @@ function deriveCurrentFromLegacy(input) {
     if (input.latestDraftStatus === "ready") {
       return {
         canvas: "analysis",
-        beat: "discuss",
+        step: "discuss",
         status: "in_progress",
         driver: "both",
         contentJson: { draftId: input.latestDraftId, analysisId: input.latestAnalysisId }
@@ -3478,7 +3478,7 @@ function deriveCurrentFromLegacy(input) {
     if (input.latestDraftStatus === "thinking" || input.latestDraftStatus === "failed") {
       return {
         canvas: "analysis",
-        beat: "analyse",
+        step: "draft",
         status: "in_progress",
         driver: "ally",
         contentJson: { draftId: input.latestDraftId, analysisId: input.latestAnalysisId }
@@ -3486,7 +3486,7 @@ function deriveCurrentFromLegacy(input) {
     }
     return {
       canvas: "analysis",
-      beat: "analyse",
+      step: "draft",
       status: "in_progress",
       driver: "ally",
       contentJson: { analysisId: input.latestAnalysisId }
@@ -3495,7 +3495,7 @@ function deriveCurrentFromLegacy(input) {
   if (!input.hasStatements) {
     return {
       canvas: "picture",
-      beat: "gather",
+      step: "gather",
       status: "not_started",
       driver: "person",
       contentJson: { statementIds: [] }
@@ -3504,7 +3504,7 @@ function deriveCurrentFromLegacy(input) {
   if (!input.hasBuildCompletedAt) {
     return {
       canvas: "picture",
-      beat: "gather",
+      step: "gather",
       status: "in_progress",
       driver: "person",
       contentJson: { statementIds: input.statementIds }
@@ -3513,7 +3513,7 @@ function deriveCurrentFromLegacy(input) {
   if (input.latestAnalysisId === null) {
     return {
       canvas: "picture",
-      beat: "analyse",
+      step: "draft",
       status: "in_progress",
       driver: "ally",
       contentJson: {}
@@ -3521,7 +3521,7 @@ function deriveCurrentFromLegacy(input) {
   }
   return {
     canvas: "picture",
-    beat: "discuss",
+    step: "discuss",
     status: "in_progress",
     driver: "both",
     contentJson: { analysisId: input.latestAnalysisId }
@@ -3530,16 +3530,16 @@ function deriveCurrentFromLegacy(input) {
 async function advanceSubStep(userId, currentId, options = {}) {
   const [current] = await db.select().from(subSteps).where(and14(eq18(subSteps.id, currentId), eq18(subSteps.userId, userId))).limit(1);
   if (!current) throw new Error("sub-step not found");
-  const nextBeat = nextBeatAfter(current.beat);
-  if (!nextBeat) throw new Error(`no beat after ${current.beat}`);
+  const nextStep = nextStepAfter(current.step);
+  if (!nextStep) throw new Error(`no step after ${current.step}`);
   await db.update(subSteps).set({ status: "agreed", agreedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(subSteps.id, current.id));
   const [created] = await db.insert(subSteps).values({
     userId,
-    canvasKey: current.canvasKey,
-    beat: nextBeat,
+    phaseKey: current.phaseKey,
+    step: nextStep,
     instance: current.instance,
     status: "in_progress",
-    driver: driverForBeat(current.canvasKey, nextBeat),
+    driver: driverForStep(current.phaseKey, nextStep),
     contentJson: options.contentJson ?? current.contentJson ?? null,
     predecessorId: current.id
   }).returning();
@@ -3548,12 +3548,12 @@ async function advanceSubStep(userId, currentId, options = {}) {
 async function agreeSubStep(userId, currentId) {
   const [current] = await db.select().from(subSteps).where(and14(eq18(subSteps.id, currentId), eq18(subSteps.userId, userId))).limit(1);
   if (!current) throw new Error("sub-step not found");
-  if (current.beat !== "discuss") throw new Error("can only agree a discuss beat");
+  if (current.step !== "discuss") throw new Error("can only agree a discuss step");
   await db.update(subSteps).set({ status: "agreed", agreedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(subSteps.id, current.id));
   const [live] = await db.insert(subSteps).values({
     userId,
-    canvasKey: current.canvasKey,
-    beat: "live",
+    phaseKey: current.phaseKey,
+    step: "live",
     instance: current.instance,
     status: "in_progress",
     driver: "both",
@@ -3565,12 +3565,12 @@ async function agreeSubStep(userId, currentId) {
 async function reopenSubStep(userId, currentId) {
   const [current] = await db.select().from(subSteps).where(and14(eq18(subSteps.id, currentId), eq18(subSteps.userId, userId))).limit(1);
   if (!current) throw new Error("sub-step not found");
-  if (current.beat !== "live") throw new Error("can only reopen a live beat");
+  if (current.step !== "live") throw new Error("can only reopen a live step");
   await db.update(subSteps).set({ status: "superseded", supersededAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(subSteps.id, current.id));
   const [discuss] = await db.insert(subSteps).values({
     userId,
-    canvasKey: current.canvasKey,
-    beat: "discuss",
+    phaseKey: current.phaseKey,
+    step: "discuss",
     instance: current.instance + 1,
     status: "in_progress",
     driver: "both",
@@ -3585,15 +3585,15 @@ async function markAnalyseError(userId, subStepId, errorMessage) {
 async function clearAnalyseError(userId, subStepId) {
   await db.update(subSteps).set({ errorMessage: null, updatedAt: /* @__PURE__ */ new Date() }).where(and14(eq18(subSteps.id, subStepId), eq18(subSteps.userId, userId)));
 }
-function nextBeatAfter(beat) {
-  if (beat === "gather") return "analyse";
-  if (beat === "analyse") return "discuss";
-  if (beat === "discuss") return "live";
+function nextStepAfter(step) {
+  if (step === "gather") return "draft";
+  if (step === "draft") return "discuss";
+  if (step === "discuss") return "live";
   return null;
 }
-function driverForBeat(canvas, beat) {
-  if (beat === "gather") return canvas === "picture" || canvas === "progress" ? "person" : "ally";
-  if (beat === "analyse") return "ally";
+function driverForStep(canvas, step) {
+  if (step === "gather") return canvas === "picture" || canvas === "progress" ? "person" : "ally";
+  if (step === "draft") return "ally";
   return "both";
 }
 
@@ -3624,17 +3624,17 @@ router9.post("/api/sub-step/:id/advance", async (req, res) => {
       action: "sub_step.advance",
       resourceType: "sub_step",
       resourceId: String(next.id),
-      detail: { from: id, toBeat: next.beat }
+      detail: { from: id, toBeat: next.step }
     });
-    if (prior?.beat === "gather") {
+    if (prior?.step === "gather") {
       const content = prior.contentJson ?? {};
       onStateChange({
         userId: user.id,
         trigger: "gather_advanced",
         subStepId: prior.id,
-        canvas: prior.canvasKey,
+        canvas: prior.phaseKey,
         payload: {
-          canvas: prior.canvasKey,
+          canvas: prior.phaseKey,
           statementCount: Array.isArray(content.statementIds) ? content.statementIds.length : null
         }
       }).catch(() => {
@@ -3686,7 +3686,7 @@ router9.post("/api/sub-step/:id/skip", async (req, res) => {
     label: `Skipped: ${parsed.data.itemLabel}`,
     body: reason,
     sourceKind: "user_stated",
-    sourceCanvas: sub.canvasKey,
+    sourcePhase: sub.phaseKey,
     sourceSubStepId: sub.id,
     attributes: { skippedWithoutReason: reason === null }
   });
@@ -3717,9 +3717,9 @@ router9.post("/api/sub-step/:id/discuss-topic", async (req, res) => {
     userId: user.id,
     trigger: "topic_initiated",
     subStepId: sub.id,
-    canvas: sub.canvasKey,
+    canvas: sub.phaseKey,
     payload: {
-      canvas: sub.canvasKey,
+      canvas: sub.phaseKey,
       itemKey: parsed.data.itemKey,
       itemLabel: parsed.data.itemLabel
     }
@@ -3739,9 +3739,9 @@ router9.post("/api/sub-step/:id/agree", async (req, res) => {
   if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
   try {
     const live = await agreeSubStep(user.id, id);
-    if (live.canvasKey === "picture") {
+    if (live.phaseKey === "picture") {
       await db.update(conversations).set({ status: "complete", completedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(and15(eq19(conversations.userId, user.id), eq19(conversations.status, "active")));
-    } else if (live.canvasKey === "analysis") {
+    } else if (live.phaseKey === "analysis") {
       const content = live.contentJson ?? {};
       if (content.draftId) {
         await db.update(analysisDrafts).set({ status: "agreed", agreedAt: /* @__PURE__ */ new Date() }).where(
@@ -3761,16 +3761,16 @@ router9.post("/api/sub-step/:id/agree", async (req, res) => {
         userId: user.id,
         trigger: "discuss_agreed",
         subStepId: id,
-        canvas: live.canvasKey,
+        canvas: live.phaseKey,
         payload: {
-          canvas: live.canvasKey,
+          canvas: live.phaseKey,
           analysisId: content.analysisId ?? null,
           draftId: content.draftId ?? null
         }
       }).catch(() => {
       });
     }
-    if (live.canvasKey === "picture") {
+    if (live.phaseKey === "picture") {
       await startCanvas2ForUser(user.id).catch((err) => {
         console.error("[sub_step.agree] startCanvas2 failed:", err);
       });
@@ -3798,8 +3798,8 @@ router9.post("/api/sub-step/:id/reopen", async (req, res) => {
       userId: user.id,
       trigger: "live_reopened",
       subStepId: id,
-      canvas: discuss.canvasKey,
-      payload: { canvas: discuss.canvasKey }
+      canvas: discuss.phaseKey,
+      payload: { canvas: discuss.phaseKey }
     }).catch(() => {
     });
     res.json(discuss);
@@ -3831,7 +3831,7 @@ router9.post("/api/sub-step/:id/message", async (req, res) => {
   }
   const [sub] = await db.select().from(subSteps).where(and15(eq19(subSteps.id, id), eq19(subSteps.userId, user.id))).limit(1);
   if (!sub) return res.status(404).json({ error: "not_found" });
-  if (sub.canvasKey !== "picture" || sub.beat !== "discuss") {
+  if (sub.phaseKey !== "picture" || sub.step !== "discuss") {
     return res.status(400).json({ error: "chat_not_supported_for_beat" });
   }
   const [userMsg] = await db.insert(subStepMessages).values({ subStepId: sub.id, role: "user", content: parsed.data.content }).returning();
@@ -3842,7 +3842,7 @@ async function loadMessages3(subStepId) {
 }
 async function runPictureAnalyse(userId, subStepId) {
   const [sub] = await db.select().from(subSteps).where(eq19(subSteps.id, subStepId)).limit(1);
-  if (!sub || sub.beat !== "analyse" || sub.canvasKey !== "picture") return;
+  if (!sub || sub.step !== "draft" || sub.phaseKey !== "picture") return;
   const sts = await db.select().from(statements).where(and15(eq19(statements.userId, userId), eq19(statements.status, "extracted")));
   if (sts.length === 0) {
     await markAnalyseError(userId, subStepId, "no_statements");
@@ -3898,9 +3898,9 @@ async function runPictureAnalyse(userId, subStepId) {
   }
 }
 async function maybeKickoffAnalyse(userId, sub) {
-  if (sub.beat !== "analyse" || sub.status !== "in_progress" || sub.errorMessage) return;
+  if (sub.step !== "draft" || sub.status !== "in_progress" || sub.errorMessage) return;
   const content = sub.contentJson ?? {};
-  if (sub.canvasKey === "picture") {
+  if (sub.phaseKey === "picture") {
     if (content.analysisId) return;
     const claimed = await tryClaimAnalyse(sub.id);
     if (!claimed) return;
@@ -3910,7 +3910,7 @@ async function maybeKickoffAnalyse(userId, sub) {
     });
     return;
   }
-  if (sub.canvasKey === "analysis") {
+  if (sub.phaseKey === "analysis") {
     if (content.draftId) return;
     const claimed = await tryClaimAnalyse(sub.id);
     if (!claimed) return;
@@ -3950,15 +3950,15 @@ async function startCanvas2ForUser(userId) {
   const [existing] = await db.select().from(subSteps).where(
     and15(
       eq19(subSteps.userId, userId),
-      eq19(subSteps.canvasKey, "analysis"),
+      eq19(subSteps.phaseKey, "analysis"),
       isNull6(subSteps.supersededAt)
     )
   ).limit(1);
   if (existing) return;
   const [gather] = await db.insert(subSteps).values({
     userId,
-    canvasKey: "analysis",
-    beat: "gather",
+    phaseKey: "analysis",
+    step: "gather",
     instance: 1,
     status: "in_progress",
     driver: "ally",
@@ -3971,7 +3971,7 @@ async function startCanvas2ForUser(userId) {
 }
 async function runAnalysisAnalyse(userId, subStepId) {
   const [sub] = await db.select().from(subSteps).where(eq19(subSteps.id, subStepId)).limit(1);
-  if (!sub || sub.canvasKey !== "analysis" || sub.beat !== "analyse") return;
+  if (!sub || sub.phaseKey !== "analysis" || sub.step !== "draft") return;
   const [factsPrompt, prosePrompt, panelsPrompt] = await Promise.all([
     getActivePrompt("analysis_facts"),
     getActivePrompt("analysis_prose"),
@@ -4175,7 +4175,7 @@ var writeNoteBody = z10.object({
   evidenceRefs: z10.unknown().optional(),
   attributes: z10.unknown().optional(),
   confidence: z10.number().min(0).max(1).optional(),
-  sourceCanvas: z10.string().optional(),
+  sourcePhase: z10.string().optional(),
   sourceSubStepId: z10.number().optional(),
   sourceMessageId: z10.number().optional(),
   segmentIds: z10.array(z10.number()).optional()

@@ -6,15 +6,17 @@ import { PhaseActionBar, type PhaseStep } from "@/components/PhaseActionBar";
 import { AllyAtWork, type AllyAtWorkMode } from "@/components/AllyAtWork";
 import { AnalysePeek } from "@/components/AnalysePeek";
 import { useAuth } from "@/hooks/useAuth";
-import { BEAT_LABEL, BEAT_STATUS_LINE } from "@/lib/canvasCopy";
+import { STEP_LABEL, STEP_STATUS_LINE } from "@/lib/canvasCopy";
 import type { SubStep } from "@shared/schema";
 
-// Canvas 1, Analyse beat. Renders AllyAtWork while the server's background
-// worker produces the first-take analysis.
+// Phase 2, Analyse step. Ally is at work — facts → prose + panels pipeline.
+// The server's background worker drives status transitions; this screen just
+// reflects the sub-step's errorMessage as the hit_problem sub-mode.
 //
-// Peek mode: when navigated here while sub-step is elsewhere, render the
-// static historical recap (AnalysePeek) — never lie that work is in flight.
-export function PictureAnalyse({
+// Peek mode: when the user navigates here while sub-step is elsewhere,
+// render the static historical recap (AnalysePeek) — never lie that work
+// is in flight.
+export function AnalysisDraft({
   subStep,
   peek,
   onBackToCurrent,
@@ -34,15 +36,15 @@ export function PictureAnalyse({
   const mode: AllyAtWorkMode = subStep.errorMessage ? "hit_problem" : "working";
 
   const steps: PhaseStep[] = [
-    { key: "gather", label: BEAT_LABEL.picture.gather.title, status: "past", caption: "done" },
+    { key: "gather", label: STEP_LABEL.analysis.gather.title || "Pulled in", status: "past", caption: "done" },
     {
-      key: "analyse",
-      label: BEAT_LABEL.picture.analyse.title,
+      key: "draft",
+      label: STEP_LABEL.analysis.draft.title,
       status: "current",
       caption: mode === "hit_problem" ? "hit a snag" : "in progress",
     },
-    { key: "discuss", label: BEAT_LABEL.picture.discuss.title, status: "future", caption: "opens when I'm done" },
-    { key: "live", label: BEAT_LABEL.picture.live.title, status: "future", caption: "—" },
+    { key: "discuss", label: STEP_LABEL.analysis.discuss.title, status: "future", caption: "opens when I'm done" },
+    { key: "live", label: STEP_LABEL.analysis.live.title, status: "future", caption: "—" },
   ];
 
   return (
@@ -55,18 +57,18 @@ export function PictureAnalyse({
           />
         }
         name={displayName}
-        statusLine={<span className="text-muted-foreground">{BEAT_STATUS_LINE.picture.analyse}</span>}
+        statusLine={<span className="text-muted-foreground">{STEP_STATUS_LINE.analysis.draft}</span>}
       />
       <div className="flex-1 min-h-0 overflow-auto shadow-[inset_0_0_0_4px_var(--color-muted)]">
         {peek ? (
-          <AnalysePeek canvas="picture" onSeeResult={onBackToCurrent} />
+          <AnalysePeek canvas="analysis" onSeeResult={onBackToCurrent} />
         ) : (
           <AllyAtWork
             mode={mode}
-            title={displayName ? `Reading your year, ${displayName}…` : "Reading across everything you've shared…"}
-            expectedSeconds={75}
-            rotatorLabel="While I read · a short story"
-            canvas="picture"
+            title={displayName ? `Writing your analysis, ${displayName}…` : "Writing your analysis…"}
+            expectedSeconds={90}
+            rotatorLabel="While I write · a short story"
+            canvas="analysis"
             errorMessage={subStep.errorMessage}
             onRetry={() => retry.mutate()}
           />

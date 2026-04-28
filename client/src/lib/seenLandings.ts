@@ -1,22 +1,22 @@
-// Per-(canvas, beat, instance) tracking of which landing cards the user has
+// Per-(canvas, step, instance) tracking of which landing cards the user has
 // dismissed. Stored in localStorage so refreshes don't re-show the
-// interstitial — but the FIRST arrival into each new beat instance does.
+// interstitial — but the FIRST arrival into each new step instance does.
 //
 // Rule: a landing card auto-fires on initial render if the user's current
-// (canvas, beat, instance) tuple isn't in the seen set. CTA → transition →
+// (canvas, step, instance) tuple isn't in the seen set. CTA → transition →
 // onDone marks it as seen. From then on, refreshes go straight to content.
-// Server-driven beat changes (Gather → Analyse, Discuss → Live, reopen)
+// Server-driven step changes (Gather → Analyse, Discuss → Live, reopen)
 // produce a new tuple → fresh landing.
 
-import type { Beat } from "./beats";
-import type { CanvasKey } from "./canvasCopy";
+import type { Step } from "./steps";
+import type { PhaseKey } from "./canvasCopy";
 
 const STORAGE_KEY = "ally:seenLandings";
 
-type LandingKey = `${CanvasKey}:${Beat}:${number}`;
+type LandingKey = `${PhaseKey}:${Step}:${number}`;
 
-export function landingKey(canvas: CanvasKey, beat: Beat, instance: number): LandingKey {
-  return `${canvas}:${beat}:${instance}` as LandingKey;
+export function landingKey(canvas: PhaseKey, step: Step, instance: number): LandingKey {
+  return `${canvas}:${step}:${instance}` as LandingKey;
 }
 
 function readAll(): Set<LandingKey> {
@@ -40,13 +40,13 @@ function writeAll(set: Set<LandingKey>): void {
   }
 }
 
-export function hasSeenLanding(canvas: CanvasKey, beat: Beat, instance: number): boolean {
-  return readAll().has(landingKey(canvas, beat, instance));
+export function hasSeenLanding(canvas: PhaseKey, step: Step, instance: number): boolean {
+  return readAll().has(landingKey(canvas, step, instance));
 }
 
-export function markLandingSeen(canvas: CanvasKey, beat: Beat, instance: number): void {
+export function markLandingSeen(canvas: PhaseKey, step: Step, instance: number): void {
   const all = readAll();
-  all.add(landingKey(canvas, beat, instance));
+  all.add(landingKey(canvas, step, instance));
   writeAll(all);
 }
 

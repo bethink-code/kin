@@ -4,7 +4,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 
 // ============================================================================
-// Agreement gate — modal shown when the user clicks the Discuss-beat primary
+// Agreement gate — modal shown when the user clicks the Discuss-step primary
 // CTA ("This is my picture" / "This is my analysis"). Reads the checklist for
 // the sub-step, lets the user mark pending items as skipped (with a reason),
 // and only enables the lock CTA when every core item is covered or skipped.
@@ -24,7 +24,7 @@ type ChecklistItem = {
 
 type Checklist = {
   canvas: string;
-  beat: string;
+  step: string;
   items: ChecklistItem[];
   agreementReady: boolean;
 };

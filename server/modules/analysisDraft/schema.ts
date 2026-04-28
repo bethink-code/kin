@@ -1,6 +1,6 @@
 import { z } from "zod/v4";
 
-// Canvas 2 — Our analysis
+// Phase 2 — Our analysis
 // Three Claude calls produce the draft:
 //   1. analysis_facts  → structured ground truth (analysisFactsSchema)
 //   2. analysis_prose  → Format A text story   (analysisProseSchema)
@@ -103,7 +103,7 @@ export const proportionSchema = z.object({
 });
 
 export const panelBeatSchema = z.object({
-  id: z.string().describe("Stable id, e.g. 'income_shape', 'bond_weight'. Matches facts section ids when the beat is tied to one."),
+  id: z.string().describe("Stable id, e.g. 'income_shape', 'bond_weight'. Matches facts section ids when the step is tied to one."),
   anchorCopy: z.string().describe("ONE short sentence — the line of text under/beside the panel illustration. Under ~90 chars."),
   metaphor: z.enum([
     "tap_and_basin",
@@ -119,13 +119,13 @@ export const panelBeatSchema = z.object({
     "open_door",
     "stacked_stones",
     "none",
-  ]).describe("The visual metaphor to use. 'none' = copy-only beat (opener or beat of silence). Extend the enum only when a new metaphor is earned."),
+  ]).describe("The visual metaphor to use. 'none' = copy-only step (opener or step of silence). Extend the enum only when a new metaphor is earned."),
   proportion: proportionSchema.optional().describe("Optional proportional visual (e.g., income vs commitments). Rendered deterministically."),
   annotations: z.array(annotationSchema).default([]),
 });
 
 export const analysisPanelsSchema = z.object({
-  beats: z.array(panelBeatSchema).describe("Ordered top-to-bottom. The first beat IS the opening recognition."),
+  beats: z.array(panelBeatSchema).describe("Ordered top-to-bottom. The first step IS the opening recognition."),
   explainClaims: z.array(z.object({
     anchorId: z.string(),
     label: z.string(),

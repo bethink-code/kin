@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-// Real-time narration during Analyse-beat waits. Ally cycles through what
+// Real-time narration during Analyse-step waits. Ally cycles through what
 // she's doing right now — feels alive instead of passive. Replaces the
 // static subtitle when the wait is long.
 //

@@ -4,7 +4,7 @@ import { analysisFactsSchema, type AnalysisFacts } from "./schema";
 type FactsInput = {
   systemPrompt: string;
   model: string;
-  // Everything Canvas 1 produced. Shape is intentionally loose — the prompt
+  // Everything Phase 1 produced. Shape is intentionally loose — the prompt
   // works off the stringified JSON, we don't re-type each field here.
   firstTakeAnalysis: unknown;
   conversationProfile: unknown;
@@ -39,14 +39,14 @@ export async function generateFacts(input: FactsInput): Promise<{
 
 function buildUserMessage(input: FactsInput): string {
   return [
-    "# Canvas 1 outputs — produce the structured facts for Canvas 2.",
+    "# Phase 1 outputs — produce the structured facts for Phase 2.",
     "",
     "## Statements (summary)",
     "```json",
     JSON.stringify(input.statementSummaries, null, 2),
     "```",
     "",
-    "## First-take analysis (from Canvas 1)",
+    "## First-take analysis (from Phase 1)",
     "```json",
     JSON.stringify(input.firstTakeAnalysis, null, 2),
     "```",

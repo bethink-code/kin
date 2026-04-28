@@ -4,16 +4,16 @@
 //
 // Steps:
 //   1. Pre-flight: confirm reset state, statements present
-//   2. Canvas 1 Gather: lazy-backfill sub-step, advance with gather_advanced
-//   3. Canvas 1 Analyse: real analyseStatements call → analyse_completed
-//   4. Canvas 1 Discuss: /qa/start opener, three real chat turns → chat_turn_taken
-//   5. Canvas 1 Agree: agreeSubStep + discuss_agreed → Live opener +
-//      Canvas 2 startup + meta-synthesis trigger
-//   6. Canvas 2 Analyse: real buildAnalysisDraft → analyse_completed
-//   7. Canvas 2 Discuss: /analysis-conversation/start opener, two real
+//   2. Phase 1 Gather: lazy-backfill sub-step, advance with gather_advanced
+//   3. Phase 1 Analyse: real analyseStatements call → analyse_completed
+//   4. Phase 1 Discuss: /qa/start opener, three real chat turns → chat_turn_taken
+//   5. Phase 1 Agree: agreeSubStep + discuss_agreed → Live opener +
+//      Phase 2 startup + meta-synthesis trigger
+//   6. Phase 2 Analyse: real buildAnalysisDraft → analyse_completed
+//   7. Phase 2 Discuss: /analysis-conversation/start opener, two real
 //      chat turns → chat_turn_taken (analysis canvas)
-//   8. Canvas 2 Agree: agreeSubStep on analysis discuss → discuss_agreed
-//   9. Canvas 1 Reopen: reopenSubStep on Canvas 1 Live → live_reopened
+//   8. Phase 2 Agree: agreeSubStep on analysis discuss → discuss_agreed
+//   9. Phase 1 Reopen: reopenSubStep on Phase 1 Live → live_reopened
 //  10. Session resumed: backdate latest msg, run isStale check + dispatch
 //  11. Final state dump
 //
@@ -106,24 +106,24 @@ async function main() {
   if (extractedSts.length === 0) throw new Error("no extracted statements");
 
   // ------------------------------------------------------------------------
-  step("2. Canvas 1 Gather → Analyse (gather_advanced)");
+  step("2. Phase 1 Gather → Analyse (gather_advanced)");
   // First call to getCurrentSubStep lazy-creates a Gather sub-step.
   const gather = await getCurrentSubStep(userId);
-  log(`current sub-step: canvas=${gather.canvasKey} beat=${gather.beat} status=${gather.status}`);
-  if (gather.beat !== "gather") throw new Error(`expected gather, got ${gather.beat}`);
+  log(`current sub-step: canvas=${gather.phaseKey} step=${gather.step} status=${gather.status}`);
+  if (gather.step !== "gather") throw new Error(`expected gather, got ${gather.step}`);
 
   // Mirror the /sub-step/:id/advance route: capture prior, advance, dispatch
   // gather_advanced.
   const [prior] = await db.select().from(subSteps).where(eq(subSteps.id, gather.id)).limit(1);
   const analyse1 = await advanceSubStep(userId, gather.id);
-  log(`advanced: ${prior!.beat} → ${analyse1.beat}`);
+  log(`advanced: ${prior!.step} → ${analyse1.step}`);
   await onStateChange({
     userId,
     trigger: "gather_advanced",
     subStepId: prior!.id,
-    canvas: prior!.canvasKey as "picture",
+    canvas: prior!.phaseKey as "picture",
     payload: {
-      canvas: prior!.canvasKey,
+      canvas: prior!.phaseKey,
       statementCount: ((prior!.contentJson ?? {}) as { statementIds?: number[] }).statementIds?.length ?? extractedSts.length,
     },
   });
@@ -133,7 +133,7 @@ async function main() {
   await db.update(users).set({ buildCompletedAt: new Date() }).where(eq(users.id, userId));
 
   // ------------------------------------------------------------------------
-  step("3. Canvas 1 Analyse — real analyseStatements call (Anthropic)");
+  step("3. Phase 1 Analyse — real analyseStatements call (Anthropic)");
   const analysisPrompt = await getActivePrompt("analysis");
   if (!analysisPrompt) throw new Error("no active 'analysis' prompt");
   log(`using prompt id=${analysisPrompt.id} model=${analysisPrompt.model}`);
@@ -188,10 +188,10 @@ async function main() {
   const discuss1 = await advanceSubStep(userId, analyse1.id, {
     contentJson: { analysisId: analysisRow.id },
   });
-  log(`sub-step advanced: ${analyse1.beat} → ${discuss1.beat}`);
+  log(`sub-step advanced: ${analyse1.step} → ${discuss1.step}`);
 
   // ------------------------------------------------------------------------
-  step("4. Canvas 1 Discuss — /qa/start + 3 chat turns");
+  step("4. Phase 1 Discuss — /qa/start + 3 chat turns");
   // Mirror /qa/start: insert conversation, run opener turn.
   const qaPrompt = await getActivePrompt("qa");
   if (!qaPrompt) throw new Error("no active qa prompt");
@@ -269,14 +269,14 @@ async function main() {
   }
 
   // ------------------------------------------------------------------------
-  step("5. Canvas 1 Agree → discuss_agreed (Live opener + Canvas 2 kickoff)");
+  step("5. Phase 1 Agree → discuss_agreed (Live opener + Phase 2 kickoff)");
   const beforeMsgs5 = await convMsgCount(c1Conv.id);
   const beforeNotes5 = await currentNoteCount();
   const beforeJobs5 = await synthesisJobCount();
 
   // Mirror /sub-step/:id/agree.
   const live1 = await agreeSubStep(userId, discuss1.id);
-  log(`agreed → live sub-step id=${live1.id} beat=${live1.beat}`);
+  log(`agreed → live sub-step id=${live1.id} step=${live1.step}`);
 
   // Legacy mirror: close the conversation.
   await db
@@ -300,14 +300,14 @@ async function main() {
   log(`synthesis jobs: ${beforeJobs5} → ${afterJobs5} (expect +1)`);
 
   // ------------------------------------------------------------------------
-  step("6. Canvas 2 Analyse — real buildAnalysisDraft (3 Anthropic calls)");
+  step("6. Phase 2 Analyse — real buildAnalysisDraft (3 Anthropic calls)");
   // Mirror startCanvas2ForUser.
   const [c2Gather] = await db
     .insert(subSteps)
     .values({
       userId,
-      canvasKey: "analysis",
-      beat: "gather",
+      phaseKey: "analysis",
+      step: "gather",
       instance: 1,
       status: "in_progress",
       driver: "ally",
@@ -315,7 +315,7 @@ async function main() {
     })
     .returning();
   const c2Analyse = await advanceSubStep(userId, c2Gather.id);
-  log(`Canvas 2 gather → analyse, sub-step id=${c2Analyse.id}`);
+  log(`Phase 2 gather → analyse, sub-step id=${c2Analyse.id}`);
 
   const [factsP, proseP, panelsP] = await Promise.all([
     getActivePrompt("analysis_facts"),
@@ -419,10 +419,10 @@ async function main() {
   const c2Discuss = await advanceSubStep(userId, c2Analyse.id, {
     contentJson: { draftId: c2Draft.id, analysisId: analysisRow.id },
   });
-  log(`Canvas 2 advanced: ${c2Analyse.beat} → ${c2Discuss.beat}`);
+  log(`Phase 2 advanced: ${c2Analyse.step} → ${c2Discuss.step}`);
 
   // ------------------------------------------------------------------------
-  step("7. Canvas 2 Discuss — start + 2 chat turns");
+  step("7. Phase 2 Discuss — start + 2 chat turns");
   const [c2Conv] = await db
     .insert(analysisConversations)
     .values({ userId, draftId: c2Draft.id, status: "active", profile: {} as object })
@@ -434,7 +434,7 @@ async function main() {
       "Here it is. Have a read — take your time.\n\nIf anything's off, tell me and I'll fix it. When it lands right, tap \"This is me\".",
     isTransition: true,
   });
-  log(`Canvas 2 conv id=${c2Conv.id} created with opener`);
+  log(`Phase 2 conv id=${c2Conv.id} created with opener`);
 
   const chatPrompt = await getActivePrompt("analysis_chat");
   if (!chatPrompt) throw new Error("no analysis_chat prompt");
@@ -538,7 +538,7 @@ async function main() {
   }
 
   // ------------------------------------------------------------------------
-  step("8. Canvas 2 Agree → discuss_agreed");
+  step("8. Phase 2 Agree → discuss_agreed");
   const beforeMsgs8 = await analysisMsgCount(c2Conv.id);
   const beforeNotes8 = await currentNoteCount();
 
@@ -558,15 +558,15 @@ async function main() {
 
   const afterMsgs8 = await analysisMsgCount(c2Conv.id);
   const afterNotes8 = await currentNoteCount();
-  log(`Canvas 2 live id=${c2Live.id}`);
+  log(`Phase 2 live id=${c2Live.id}`);
   log(`messages: ${beforeMsgs8} → ${afterMsgs8} (expect +1 Live opener for analysis)`);
   log(`notes: ${beforeNotes8} → ${afterNotes8} (expect +1 decision)`);
 
   // ------------------------------------------------------------------------
-  step("9. Canvas 1 Reopen — live_reopened");
+  step("9. Phase 1 Reopen — live_reopened");
   const beforeMsgs9 = await convMsgCount(c1Conv.id);
 
-  // Reopen Canvas 1 Live (live1.id).
+  // Reopen Phase 1 Live (live1.id).
   const c1ReDiscuss = await reopenSubStep(userId, live1.id);
   await db
     .update(conversations)
@@ -580,12 +580,12 @@ async function main() {
     payload: { canvas: "picture" },
   });
   const afterMsgs9 = await convMsgCount(c1Conv.id);
-  log(`Canvas 1 re-discuss id=${c1ReDiscuss.id} instance=${c1ReDiscuss.instance}`);
+  log(`Phase 1 re-discuss id=${c1ReDiscuss.id} instance=${c1ReDiscuss.instance}`);
   log(`messages: ${beforeMsgs9} → ${afterMsgs9} (expect +1 re-discuss opener)`);
 
   // ------------------------------------------------------------------------
   step("10. session_resumed — staleness check + dispatch");
-  // Backdate the Canvas 1 conversation's latest message.
+  // Backdate the Phase 1 conversation's latest message.
   await db
     .update(conversationMessages)
     .set({ createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000) }) // 5h ago
@@ -604,7 +604,7 @@ async function main() {
     userId,
     trigger: "session_resumed",
     canvas: "picture",
-    payload: { canvas: "picture", beat: "discuss" },
+    payload: { canvas: "picture", step: "discuss" },
   });
   const afterMsgs10 = await convMsgCount(c1Conv.id);
   log(`messages: ${beforeMsgs10} → ${afterMsgs10} (expect +1 welcome-back)`);
@@ -616,11 +616,11 @@ async function main() {
   console.log("");
   for (const n of allNotes) {
     const cat = n.category ? `[${n.category}]` : "";
-    const can = n.sourceCanvas ? `(${n.sourceCanvas})` : "";
+    const can = n.sourcePhase ? `(${n.sourcePhase})` : "";
     console.log(`  ${n.kind.padEnd(11)} ${cat.padEnd(15)} ${n.label.slice(0, 70)} ${can}`);
   }
 
-  console.log("\n--- Canvas 1 conversation ---");
+  console.log("\n--- Phase 1 conversation ---");
   const c1Msgs = await db
     .select({ role: conversationMessages.role, content: conversationMessages.content, isTransition: conversationMessages.isTransition })
     .from(conversationMessages)
@@ -631,7 +631,7 @@ async function main() {
     console.log(`  ${flag} ${m.role.padEnd(9)}: ${m.content.replace(/\n/g, " ").slice(0, 100)}${m.content.length > 100 ? "..." : ""}`);
   }
 
-  console.log("\n--- Canvas 2 conversation ---");
+  console.log("\n--- Phase 2 conversation ---");
   const c2Msgs = await db
     .select({ role: analysisConversationMessages.role, content: analysisConversationMessages.content, isTransition: analysisConversationMessages.isTransition })
     .from(analysisConversationMessages)

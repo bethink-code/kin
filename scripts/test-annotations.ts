@@ -1,6 +1,6 @@
-// Targeted test: trigger a fresh Canvas 1 analyse pass and verify the new
+// Targeted test: trigger a fresh Phase 1 analyse pass and verify the new
 // schema (annotations + explainClaims) lands correctly + claims persist
-// with analysis_id set (Canvas 1, not draft_id).
+// with analysis_id set (Phase 1, not draft_id).
 //
 // Run: doppler run -- npx tsx scripts/test-annotations.ts <userId>
 

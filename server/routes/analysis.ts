@@ -25,8 +25,8 @@ router.get("/api/analysis/latest", async (req, res) => {
   res.json(row ?? null);
 });
 
-// GET /api/analysis/:id/claims — explain claims for a Canvas 1 first-take
-// analysis. Same shape as /api/analysis-draft/:id/claims (Canvas 2). Lets
+// GET /api/analysis/:id/claims — explain claims for a Phase 1 first-take
+// analysis. Same shape as /api/analysis-draft/:id/claims (Phase 2). Lets
 // StoryArticle render clickable phrases and ExplainPane resolve them.
 router.get("/api/analysis/:id/claims", async (req, res) => {
   const user = req.user as { id: string };
@@ -129,7 +129,7 @@ router.post("/api/analysis/run", async (req, res) => {
   }
 });
 
-// POST /api/analysis/refresh — regenerate the Canvas 1 first-take analysis
+// POST /api/analysis/refresh — regenerate the Phase 1 first-take analysis
 // using the user's running qa profile + flagged issues as context. Used by:
 //   1. Manual "Refresh" button on the picture artefact pane
 //   2. Auto-trigger from qa chat when the user gives a substantive correction

@@ -3,13 +3,13 @@ import { Button } from "@/components/ui/button";
 import { formatDateLong } from "@/lib/formatters";
 import type { Analysis, AnalysisDraft as AnalysisDraftRow } from "@shared/schema";
 
-// Historical recap shown when the user peeks at a past Analyse beat via the
+// Historical recap shown when the user peeks at a past Analyse step via the
 // canvas pill. The live AllyAtWork screen would lie ("Writing your analysis…"
 // with progress bar) about a pass that already finished — this component is
 // the static "this happened" view.
 //
-// Used by both PictureAnalyse and AnalysisAnalyse when their sub-step is past
-// the analyse beat (i.e. user has navigated to a sub-step they've already
+// Used by both PictureDraft and AnalysisDraft when their sub-step is past
+// the analyse step (i.e. user has navigated to a sub-step they've already
 // agreed away from).
 export function AnalysePeek({
   canvas,
@@ -54,7 +54,7 @@ export function AnalysePeek({
     <div className="flex flex-col items-center justify-center h-full px-6 text-center">
       <div className="max-w-md">
         <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3">
-          You're looking back · this beat is done
+          You're looking back · this step is done
         </div>
         <h2 className="font-serif text-3xl mb-3">{heading}</h2>
         <p className="text-sm text-muted-foreground leading-relaxed mb-6">{subhead}</p>

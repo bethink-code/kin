@@ -7,10 +7,10 @@ import { StoryArticle, type StoryAnalysisResult } from "@/components/StoryArticl
 import { AgreementGate } from "@/components/AgreementGate";
 import { RefreshArtefactBar } from "@/components/RefreshArtefactBar";
 import { useAuth } from "@/hooks/useAuth";
-import { BEAT_LABEL, BEAT_STATUS_LINE } from "@/lib/canvasCopy";
+import { STEP_LABEL, STEP_STATUS_LINE } from "@/lib/canvasCopy";
 import type { Analysis, SubStep } from "@shared/schema";
 
-// Canvas 1, Discuss beat. The story-plus-chat sub-step. Person reads the first
+// Phase 1, Discuss step. The story-plus-chat sub-step. Person reads the first
 // take, chats with Ally to correct and fill gaps, then Agrees when ready —
 // click opens the agreement gate, which checks coverage + skips before locking.
 //
@@ -30,7 +30,7 @@ export function PictureDiscuss({
   const displayName = user?.firstName ?? user?.email?.split("@")[0] ?? "You";
   const [gateOpen, setGateOpen] = useState(false);
 
-  // The Analyse beat wrote { analysisId } into contentJson — Slice 1 simplifies
+  // The Analyse step wrote { analysisId } into contentJson — Slice 1 simplifies
   // by reading whichever analysis is latest (there's one active per user today).
   const analysisQ = useQuery<Analysis | null>({
     queryKey: ["/api/analysis/latest"],
@@ -40,15 +40,15 @@ export function PictureDiscuss({
   const storyResult = analysis?.result as StoryAnalysisResult | null | undefined;
 
   const steps: PhaseStep[] = [
-    { key: "gather", label: BEAT_LABEL.picture.gather.title, status: "past", caption: "done" },
-    { key: "analyse", label: BEAT_LABEL.picture.analyse.title, status: "past", caption: "done" },
+    { key: "gather", label: STEP_LABEL.picture.gather.title, status: "past", caption: "done" },
+    { key: "draft", label: STEP_LABEL.picture.draft.title, status: "past", caption: "done" },
     {
       key: "discuss",
-      label: BEAT_LABEL.picture.discuss.title,
+      label: STEP_LABEL.picture.discuss.title,
       status: "current",
       caption: "in conversation",
     },
-    { key: "live", label: BEAT_LABEL.picture.live.title, status: "future", caption: "—" },
+    { key: "live", label: STEP_LABEL.picture.live.title, status: "future", caption: "—" },
   ];
 
   return (
@@ -61,7 +61,7 @@ export function PictureDiscuss({
           />
         }
         name={displayName}
-        statusLine={<span className="text-muted-foreground">{BEAT_STATUS_LINE.picture.discuss}</span>}
+        statusLine={<span className="text-muted-foreground">{STEP_STATUS_LINE.picture.discuss}</span>}
       />
       <div className="flex-1 min-h-0 overflow-y-auto shadow-[inset_0_0_0_4px_var(--color-muted)]">
         {storyResult ? (

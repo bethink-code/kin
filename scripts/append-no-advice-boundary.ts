@@ -1,5 +1,5 @@
 // Append the same "Boundaries — never give advice" section to the qa and
-// qa_bring_it_in prompts so Canvas 1 chat has the same guardrail as
+// qa_bring_it_in prompts so Phase 1 chat has the same guardrail as
 // analysis_chat. Idempotent: if the section already exists, skip.
 //
 // Run: doppler run -- npx tsx scripts/append-no-advice-boundary.ts

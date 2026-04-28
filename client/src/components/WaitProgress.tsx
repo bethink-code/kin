@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 // A thin elapsed-time bar + "Xs in · about a minute" line. Used during known-
-// duration waits (Canvas 2 draft generation, Canvas 1 analysis). After the
+// duration waits (Phase 2 draft generation, Phase 1 analysis). After the
 // expected time passes the bar stays full and the label flips to "nearly
 // there" — we don't lie by staying at 99%.
 export function WaitProgress({ expectedSeconds }: { expectedSeconds: number }) {

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { Analysis, AnalysisClaim, AnalysisDraft as AnalysisDraftRow } from "@shared/schema";
-import type { CanvasKey } from "@/lib/canvasCopy";
+import type { PhaseKey } from "@/lib/canvasCopy";
 
 type EvidenceRefs = {
   refs?: Array<{ kind: string; ref: string }>;
@@ -12,18 +12,18 @@ type EvidenceRefs = {
 // evidence.
 //
 // Works for both canvases:
-//   picture  → claims live on /api/analysis/:id/claims (Canvas 1)
-//   analysis → claims live on /api/analysis-draft/:id/claims (Canvas 2)
+//   picture  → claims live on /api/analysis/:id/claims (Phase 1)
+//   analysis → claims live on /api/analysis-draft/:id/claims (Phase 2)
 export function ExplainPane({
   canvas,
   anchorId,
   onBack,
 }: {
-  canvas: CanvasKey;
+  canvas: PhaseKey;
   anchorId: string | null;
   onBack: () => void;
 }) {
-  // Canvas 1 source-of-truth — the latest done analysis.
+  // Phase 1 source-of-truth — the latest done analysis.
   const analysisQ = useQuery<Analysis | null>({
     queryKey: ["/api/analysis/latest"],
     enabled: canvas === "picture",
@@ -34,7 +34,7 @@ export function ExplainPane({
     enabled: canvas === "picture" && analysisId !== null,
   });
 
-  // Canvas 2 source-of-truth — the current non-superseded draft.
+  // Phase 2 source-of-truth — the current non-superseded draft.
   const draftQ = useQuery<AnalysisDraftRow | null>({
     queryKey: ["/api/analysis-draft/current"],
     enabled: canvas === "analysis",
