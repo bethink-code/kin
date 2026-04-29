@@ -3,17 +3,25 @@
 // Until chat integration lands, this is the only path for creating rules.
 // Run with explicit args; refuses to write without --apply.
 //
-// Usage:
+// Usage (matching kinds — credits_matching / debits_matching):
 //   doppler run --project kin --config <env> -- npx tsx scripts/seed-reinterpretation.ts \
 //     --email <user-email> \
 //     --subject income.salary \
 //     --effect include \
 //     --kind credits_matching \
-//     --predicate '{"pattern":"herbal\\\\s*horse","flags":"i"}' \
-//     --rationale "User stated all Herbal Horse credits are fragments of her R30k salary, paid in multiple deposits across the month rather than one lump sum." \
-//     [--source admin] [--apply] [--refresh]
+//     --pattern "herbal horse" --flags i \
+//     --rationale "User stated all Herbal Horse credits are fragments of her R30k salary…" \
+//     [--source admin] [--supersede <ruleId>] [--apply] [--refresh]
+//
+// Usage (range kinds — amount_in_range / date_in_range):
+//   --kind amount_in_range  --min 100  --max 1000  [--direction credit|debit]
+//   --kind date_in_range    --from 2025-01-01  --to 2025-12-31
+//
+// Fallback for arbitrary predicate shapes:
+//   --predicate '<JSON>'  (instead of --pattern / --min / etc.)
 //
 // Without --apply, the script previews what it would insert.
+// With --supersede <id>, the prior rule of that id is marked superseded by the new one.
 // With --refresh, also kicks off refreshCanvas1Analysis after insert.
 
 import { Pool, neonConfig } from "@neondatabase/serverless";
@@ -49,22 +57,74 @@ const predicateKind = arg("kind");
 const predicateRaw = arg("predicate");
 const rationale = arg("rationale");
 const source = arg("source") ?? "admin";
+const supersedeIdRaw = arg("supersede");
 const APPLY = flag("apply");
 const REFRESH = flag("refresh");
 
-if (!email || !subject || !effect || !predicateKind || !predicateRaw || !rationale) {
+if (!email || !subject || !effect || !predicateKind || !rationale) {
   console.error(
-    "Missing required args. Need: --email --subject --effect --kind --predicate --rationale\n" +
-      "Optional: --source <user_correction|ally_inference|admin>  --apply  --refresh",
+    "Missing required args. Need: --email --subject --effect --kind --rationale\n" +
+      "Plus a predicate spec — either:\n" +
+      "  --predicate '<JSON>'  (raw)\n" +
+      "  --pattern <regex> [--flags <chars>]            (for credits_matching / debits_matching)\n" +
+      "  --min <n> --max <n> [--direction credit|debit] (for amount_in_range)\n" +
+      "  --from YYYY-MM-DD --to YYYY-MM-DD              (for date_in_range)\n" +
+      "Optional: --source <user_correction|ally_inference|admin>\n" +
+      "          --supersede <ruleId>  --apply  --refresh",
   );
   process.exit(1);
 }
 
+const supersedeId = supersedeIdRaw ? Number.parseInt(supersedeIdRaw, 10) : null;
+if (supersedeIdRaw && !Number.isFinite(supersedeId)) {
+  console.error(`--supersede must be a numeric rule id, got: ${supersedeIdRaw}`);
+  process.exit(1);
+}
+
+// Build the predicate from either the raw JSON arg or the kind-specific args.
+// Convenience args avoid PowerShell's JSON escape gymnastics.
 let predicate: unknown;
-try {
-  predicate = JSON.parse(predicateRaw);
-} catch (e) {
-  console.error(`--predicate must be valid JSON: ${(e as Error).message}`);
+if (predicateRaw) {
+  try {
+    predicate = JSON.parse(predicateRaw);
+  } catch (e) {
+    console.error(`--predicate must be valid JSON: ${(e as Error).message}`);
+    process.exit(1);
+  }
+} else if (predicateKind === "credits_matching" || predicateKind === "debits_matching") {
+  const pattern = arg("pattern");
+  if (!pattern) {
+    console.error(`--kind ${predicateKind} requires --pattern <regex> (or --predicate '<JSON>')`);
+    process.exit(1);
+  }
+  const flags = arg("flags");
+  predicate = flags ? { pattern, flags } : { pattern };
+} else if (predicateKind === "amount_in_range") {
+  const min = arg("min") ? Number.parseFloat(arg("min")!) : undefined;
+  const max = arg("max") ? Number.parseFloat(arg("max")!) : undefined;
+  const direction = arg("direction") as "credit" | "debit" | undefined;
+  if (min == null && max == null) {
+    console.error("--kind amount_in_range requires at least one of --min or --max");
+    process.exit(1);
+  }
+  predicate = {
+    ...(min != null ? { min } : {}),
+    ...(max != null ? { max } : {}),
+    ...(direction ? { direction } : {}),
+  };
+} else if (predicateKind === "date_in_range") {
+  const from = arg("from");
+  const to = arg("to");
+  if (!from && !to) {
+    console.error("--kind date_in_range requires at least one of --from or --to");
+    process.exit(1);
+  }
+  predicate = {
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+  };
+} else {
+  console.error(`Unknown --kind: ${predicateKind}. Pass --predicate '<JSON>' for arbitrary shapes.`);
   process.exit(1);
 }
 
@@ -110,6 +170,19 @@ if (!parsed.success) {
     })
     .returning();
   console.log(`\n[APPLIED] rule ${created.id} created for ${email}.`);
+
+  if (supersedeId != null) {
+    const [prior] = await db
+      .update(reinterpretations)
+      .set({ status: "superseded", supersededBy: created.id, supersededAt: new Date() })
+      .where(eq(reinterpretations.id, supersedeId))
+      .returning();
+    if (prior) {
+      console.log(`[SUPERSEDED] rule ${supersedeId} marked superseded by ${created.id}.`);
+    } else {
+      console.warn(`[SUPERSEDE] no rule with id ${supersedeId} found — nothing superseded.`);
+    }
+  }
 
   if (!REFRESH) {
     console.log("Pass --refresh to also kick off a fresh analysis.");
